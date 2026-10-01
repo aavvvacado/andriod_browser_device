@@ -38,6 +38,7 @@ class _DeviceScreenViewState extends State<DeviceScreenView> {
   bool _isConfigured = false;
   bool _isFirstFrameReceived = false;
   bool _isPointerDown = false;
+  web.EventListener? _pasteListener;
 
   @override
   void initState() {
@@ -45,6 +46,26 @@ class _DeviceScreenViewState extends State<DeviceScreenView> {
     _initCanvas();
     _initDecoder();
     _subscribeToStream();
+    _initPasteListener();
+  }
+
+  void _initPasteListener() {
+    try {
+      _pasteListener = ((web.ClipboardEvent e) {
+        final pastedText = e.clipboardData?.getData('text') ?? '';
+        if (pastedText.isNotEmpty && mounted) {
+          context.read<InputBloc>().add(SendClipboardEvent(pastedText));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Pasted "${pastedText.length > 20 ? '${pastedText.substring(0, 20)}...' : pastedText}" to Android'),
+              duration: const Duration(seconds: 1),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }).toJS as web.EventListener;
+      web.window.addEventListener('paste', _pasteListener);
+    } catch (_) {}
   }
 
   void _initCanvas() {
@@ -182,7 +203,16 @@ class _DeviceScreenViewState extends State<DeviceScreenView> {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text('Android clipboard copied: "$text"'),
-                  duration: const Duration(seconds: 2),
+                  action: SnackBarAction(
+                    label: 'Copy',
+                    textColor: AppTheme.primaryLight,
+                    onPressed: () {
+                      try {
+                        web.window.navigator.clipboard.writeText(text);
+                      } catch (_) {}
+                    },
+                  ),
+                  duration: const Duration(seconds: 3),
                   behavior: SnackBarBehavior.floating,
                 ),
               );
@@ -256,6 +286,11 @@ class _DeviceScreenViewState extends State<DeviceScreenView> {
   @override
   void dispose() {
     _streamSub?.cancel();
+    if (_pasteListener != null) {
+      try {
+        web.window.removeEventListener('paste', _pasteListener);
+      } catch (_) {}
+    }
     _decoder?.close();
     _focusNode.dispose();
     super.dispose();

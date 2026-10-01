@@ -4,17 +4,21 @@ class DeviceMetadata extends Equatable {
   final String model;
   final int width;
   final int height;
+  final String sessionId;
+  final String kioskPackage;
 
   const DeviceMetadata({
     required this.model,
     required this.width,
     required this.height,
+    this.sessionId = '',
+    this.kioskPackage = 'com.android.calculator2',
   });
 
   double get aspectRatio => width > 0 && height > 0 ? width / height : 9 / 20;
 
   @override
-  List<Object?> get props => [model, width, height];
+  List<Object?> get props => [model, width, height, sessionId, kioskPackage];
 }
 
 class SessionConfig extends Equatable {

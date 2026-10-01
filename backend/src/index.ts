@@ -6,6 +6,7 @@ import { WebSocketStreamBroadcaster } from './infrastructure/websocket/websocket
 import { SessionManagerService } from './application/services/session-manager.service.js';
 import { createHttpServer } from './interfaces/http/http.server.js';
 import { WebSocketGateway } from './interfaces/websocket/websocket.gateway.js';
+import { SessionRecorder } from './infrastructure/recording/session-recorder.service.js';
 
 const logger = new Logger('AppBootstrap');
 
@@ -37,9 +38,16 @@ async function bootstrap() {
     logger.info(`=======================================================`);
   });
 
+  // 4b. Background disk space protector: prune unsaved/abandoned recordings
+  SessionRecorder.pruneUnsaved();
+  const prunerInterval = setInterval(() => {
+    SessionRecorder.pruneUnsaved();
+  }, 120000);
+
   // 5. Graceful shutdown handler
   const shutdown = async (signal: string) => {
     logger.info(`Received ${signal}. Initiating graceful termination...`);
+    clearInterval(prunerInterval);
     httpServer.close();
     await sessionManager.terminateAll();
     logger.info('Graceful shutdown completed.');

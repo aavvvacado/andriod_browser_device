@@ -20,6 +20,22 @@ class ConnectSessionEvent extends SessionEvent {
 
 class DisconnectSessionEvent extends SessionEvent {}
 
+class StopSessionEvent extends SessionEvent {}
+
+class SaveRecordingEvent extends SessionEvent {
+  final String sessionId;
+  const SaveRecordingEvent(this.sessionId);
+  @override
+  List<Object?> get props => [sessionId];
+}
+
+class DeleteRecordingEvent extends SessionEvent {
+  final String sessionId;
+  const DeleteRecordingEvent(this.sessionId);
+  @override
+  List<Object?> get props => [sessionId];
+}
+
 class SessionPacketReceivedEvent extends SessionEvent {
   final dynamic packet;
   const SessionPacketReceivedEvent(this.packet);
@@ -61,6 +77,21 @@ class SessionConnected extends SessionState {
   List<Object?> get props => [metadata, config];
 }
 
+class SessionEnded extends SessionState {
+  final String sessionId;
+  final String deviceModel;
+  final String recordingUrl;
+
+  const SessionEnded({
+    required this.sessionId,
+    this.deviceModel = 'Android Device',
+    this.recordingUrl = '',
+  });
+
+  @override
+  List<Object?> get props => [sessionId, deviceModel, recordingUrl];
+}
+
 class SessionDisconnected extends SessionState {
   final String reason;
   const SessionDisconnected({this.reason = 'Disconnected from server'});
@@ -83,6 +114,9 @@ class SessionBloc extends Bloc<SessionEvent, SessionState> {
   SessionBloc({required this.repository}) : super(SessionInitial()) {
     on<ConnectSessionEvent>(_onConnect);
     on<DisconnectSessionEvent>(_onDisconnect);
+    on<StopSessionEvent>(_onStopSession);
+    on<SaveRecordingEvent>(_onSaveRecording);
+    on<DeleteRecordingEvent>(_onDeleteRecording);
     on<SessionPacketReceivedEvent>(_onPacketReceived);
   }
 
@@ -105,6 +139,27 @@ class SessionBloc extends Bloc<SessionEvent, SessionState> {
     emit(const SessionDisconnected(reason: 'User disconnected'));
   }
 
+  Future<void> _onStopSession(StopSessionEvent event, Emitter<SessionState> emit) async {
+    if (state is SessionConnected) {
+      final s = state as SessionConnected;
+      repository.sendStopSession();
+      emit(SessionEnded(
+        sessionId: s.metadata.sessionId,
+        deviceModel: s.metadata.model,
+        recordingUrl: '/api/recordings/${s.metadata.sessionId}',
+      ));
+    }
+  }
+
+  Future<void> _onSaveRecording(SaveRecordingEvent event, Emitter<SessionState> emit) async {
+    repository.sendSaveRecording(event.sessionId);
+  }
+
+  Future<void> _onDeleteRecording(DeleteRecordingEvent event, Emitter<SessionState> emit) async {
+    repository.sendDeleteRecording(event.sessionId);
+    emit(SessionInitial());
+  }
+
   void _onPacketReceived(SessionPacketReceivedEvent event, Emitter<SessionState> emit) {
     final data = event.packet;
 
@@ -115,6 +170,8 @@ class SessionBloc extends Bloc<SessionEvent, SessionState> {
           model: data['model'] ?? data['deviceModel'] ?? 'Android Device',
           width: data['width'] ?? 0,
           height: data['height'] ?? 0,
+          sessionId: data['sessionId'] ?? '',
+          kioskPackage: data['kioskPackage'] ?? 'com.android.calculator2',
         );
 
         if (state is SessionConnected) {
@@ -133,8 +190,23 @@ class SessionBloc extends Bloc<SessionEvent, SessionState> {
         if (state is SessionConnected) {
           emit((state as SessionConnected).copyWith(config: config));
         }
+      } else if (type == 'session_ended') {
+        emit(SessionEnded(
+          sessionId: data['sessionId'] ?? '',
+          deviceModel: data['deviceModel'] ?? 'Android Device',
+          recordingUrl: data['recordingUrl'] ?? '',
+        ));
       } else if (type == 'closed') {
-        emit(SessionDisconnected(reason: data['reason'] ?? 'Connection closed'));
+        if (state is SessionConnected) {
+          final s = state as SessionConnected;
+          emit(SessionEnded(
+            sessionId: s.metadata.sessionId,
+            deviceModel: s.metadata.model,
+            recordingUrl: '/api/recordings/${s.metadata.sessionId}',
+          ));
+        } else {
+          emit(SessionDisconnected(reason: data['reason'] ?? 'Connection closed'));
+        }
       } else if (type == 'error') {
         emit(SessionError(data['message'] ?? 'Server error'));
       }

@@ -22,6 +22,10 @@ class _RecordingsDialogState extends State<RecordingsDialog> {
     _fetchRecordings();
   }
 
+  String _getClientToken() {
+    return web.window.localStorage.getItem('client_token') ?? '';
+  }
+
   Future<void> _fetchRecordings() async {
     setState(() {
       _isLoading = true;
@@ -31,7 +35,9 @@ class _RecordingsDialogState extends State<RecordingsDialog> {
     try {
       final host = web.window.location.host.isNotEmpty ? web.window.location.host : 'localhost:3000';
       final protocol = web.window.location.protocol.startsWith('https') ? 'https:' : 'http:';
-      final res = await http.get(Uri.parse('$protocol//$host/api/recordings'));
+      final token = _getClientToken();
+      final uri = Uri.parse('$protocol//$host/api/recordings?clientToken=$token');
+      final res = await http.get(uri, headers: token.isNotEmpty ? {'x-client-token': token} : {});
 
       if (res.statusCode == 200) {
         final List<dynamic> decoded = jsonDecode(res.body);
@@ -56,8 +62,31 @@ class _RecordingsDialogState extends State<RecordingsDialog> {
   void _downloadRecording(String sessionId) {
     final host = web.window.location.host.isNotEmpty ? web.window.location.host : 'localhost:3000';
     final protocol = web.window.location.protocol.startsWith('https') ? 'https:' : 'http:';
-    final url = '$protocol//$host/api/recordings/$sessionId';
+    final token = _getClientToken();
+    final url = '$protocol//$host/api/recordings/$sessionId?clientToken=$token';
     web.window.open(url, '_blank');
+  }
+
+  Future<void> _deleteRecording(String sessionId) async {
+    try {
+      final host = web.window.location.host.isNotEmpty ? web.window.location.host : 'localhost:3000';
+      final protocol = web.window.location.protocol.startsWith('https') ? 'https:' : 'http:';
+      final token = _getClientToken();
+      final res = await http.delete(
+        Uri.parse('$protocol//$host/api/recordings/$sessionId?clientToken=$token'),
+        headers: token.isNotEmpty ? {'x-client-token': token} : {},
+      );
+      if (res.statusCode == 200 && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Deleted recording $sessionId from server disk'),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+        _fetchRecordings();
+      }
+    } catch (_) {}
   }
 
   @override
@@ -211,6 +240,12 @@ class _RecordingsDialogState extends State<RecordingsDialog> {
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                 ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                icon: const Icon(Icons.delete_outline_rounded, color: AppTheme.danger, size: 20),
+                tooltip: 'Delete recording from server',
+                onPressed: () => _deleteRecording(id),
               ),
             ],
           ),

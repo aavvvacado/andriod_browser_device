@@ -14,15 +14,17 @@ class SessionRecorder {
     sessionId;
     deviceSerial;
     deviceModel;
+    clientToken;
     logger = new logger_js_1.Logger('SessionRecorder');
     recordingsDir;
     writeStream = null;
     metadata;
     isClosed = false;
-    constructor(sessionId, deviceSerial, deviceModel, baseDir = process.cwd()) {
+    constructor(sessionId, deviceSerial, deviceModel, clientToken = '', baseDir = process.cwd()) {
         this.sessionId = sessionId;
         this.deviceSerial = deviceSerial;
         this.deviceModel = deviceModel;
+        this.clientToken = clientToken;
         this.recordingsDir = path_1.default.join(baseDir, 'recordings');
         if (!fs_1.default.existsSync(this.recordingsDir)) {
             fs_1.default.mkdirSync(this.recordingsDir, { recursive: true });
@@ -31,14 +33,16 @@ class SessionRecorder {
         this.writeStream = fs_1.default.createWriteStream(rawFilePath, { flags: 'a' });
         this.metadata = {
             sessionId,
+            clientToken,
             deviceSerial,
             deviceModel,
             startTime: Date.now(),
             rawFilePath,
             status: 'recording',
+            saved: false,
         };
         this.saveMetadata();
-        this.logger.info(`Session recording started for ${sessionId} -> ${rawFilePath}`);
+        this.logger.info(`Session recording started for ${sessionId} (client: ${clientToken || 'anonymous'}) -> ${rawFilePath}`);
     }
     writePacket(data) {
         if (this.isClosed || !this.writeStream)
@@ -106,7 +110,88 @@ class SessionRecorder {
             this.logger.warn(`Failed to save recording metadata: ${err.message}`);
         }
     }
-    static listRecordings(baseDir = process.cwd()) {
+    static getMetadata(sessionId, baseDir = process.cwd()) {
+        const metaPath = path_1.default.join(baseDir, 'recordings', `${sessionId}.json`);
+        if (!fs_1.default.existsSync(metaPath))
+            return null;
+        try {
+            return JSON.parse(fs_1.default.readFileSync(metaPath, 'utf-8'));
+        }
+        catch {
+            return null;
+        }
+    }
+    static saveRecording(sessionId, baseDir = process.cwd()) {
+        const dir = path_1.default.join(baseDir, 'recordings');
+        const metaPath = path_1.default.join(dir, `${sessionId}.json`);
+        if (!fs_1.default.existsSync(metaPath))
+            return null;
+        try {
+            const meta = JSON.parse(fs_1.default.readFileSync(metaPath, 'utf-8'));
+            meta.saved = true;
+            fs_1.default.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+            const logger = new logger_js_1.Logger('SessionRecorder');
+            logger.info(`Marked session recording ${sessionId} as permanently SAVED`);
+            return meta;
+        }
+        catch {
+            return null;
+        }
+    }
+    static deleteRecording(sessionId, baseDir = process.cwd()) {
+        const dir = path_1.default.join(baseDir, 'recordings');
+        const logger = new logger_js_1.Logger('SessionRecorder');
+        let deletedAny = false;
+        const filesToDelete = [
+            path_1.default.join(dir, `${sessionId}.h264`),
+            path_1.default.join(dir, `${sessionId}.mp4`),
+            path_1.default.join(dir, `${sessionId}.json`),
+        ];
+        for (const f of filesToDelete) {
+            if (fs_1.default.existsSync(f)) {
+                try {
+                    fs_1.default.unlinkSync(f);
+                    deletedAny = true;
+                }
+                catch (err) {
+                    logger.warn(`Could not delete recording file ${f}: ${err.message}`);
+                }
+            }
+        }
+        if (deletedAny) {
+            logger.info(`Deleted session recording files for ${sessionId} to reclaim disk space`);
+        }
+        return deletedAny;
+    }
+    static pruneUnsaved(maxAgeMs = 180000, baseDir = process.cwd()) {
+        const dir = path_1.default.join(baseDir, 'recordings');
+        if (!fs_1.default.existsSync(dir))
+            return 0;
+        const now = Date.now();
+        let prunedCount = 0;
+        const jsonFiles = fs_1.default.readdirSync(dir).filter(f => f.endsWith('.json'));
+        for (const jf of jsonFiles) {
+            const metaPath = path_1.default.join(dir, jf);
+            try {
+                const meta = JSON.parse(fs_1.default.readFileSync(metaPath, 'utf-8'));
+                const age = now - (meta.startTime || 0);
+                // If not explicitly saved and exceeds maxAgeMs, prune files
+                if (meta.saved !== true && age > maxAgeMs) {
+                    SessionRecorder.deleteRecording(meta.sessionId, baseDir);
+                    prunedCount++;
+                }
+            }
+            catch {
+                // Corrupt JSON, delete it
+                try {
+                    fs_1.default.unlinkSync(metaPath);
+                }
+                catch { }
+            }
+        }
+        return prunedCount;
+    }
+    static listRecordings(baseDir = process.cwd(), onlySaved = false, clientToken) {
         const dir = path_1.default.join(baseDir, 'recordings');
         if (!fs_1.default.existsSync(dir))
             return [];
@@ -115,7 +200,15 @@ class SessionRecorder {
         for (const f of files) {
             try {
                 const content = fs_1.default.readFileSync(path_1.default.join(dir, f), 'utf-8');
-                list.push(JSON.parse(content));
+                const meta = JSON.parse(content);
+                if (onlySaved && meta.saved !== true)
+                    continue;
+                // Machine / Client Isolation:
+                // Ensure recordings on server are never visible to users on different machines
+                if (clientToken && meta.clientToken && meta.clientToken !== clientToken) {
+                    continue;
+                }
+                list.push(meta);
             }
             catch (_) { }
         }

@@ -109,5 +109,28 @@ class SessionRepositoryImpl implements ISessionRepository {
       'clientTime': clientTime,
     });
   }
+
+  @override
+  void sendStopSession() {
+    sendJson({
+      'type': 'stop_session',
+    });
+  }
+
+  @override
+  void sendSaveRecording(String sessionId) {
+    sendJson({
+      'type': 'save_recording',
+      'sessionId': sessionId,
+    });
+  }
+
+  @override
+  void sendDeleteRecording(String sessionId) {
+    sendJson({
+      'type': 'delete_recording',
+      'sessionId': sessionId,
+    });
+  }
 }
 

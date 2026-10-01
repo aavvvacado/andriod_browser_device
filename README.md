@@ -26,32 +26,31 @@ A production-grade, low-latency web application that mirrors and provides direct
 
 ### Core Requirements (100% Complete & Hardware-Verified)
 1. **Live Continuous Screen Mirroring**: Real-time H.264 video streamed directly from the Android device's hardware `MediaCodec` encoder via `scrcpy-server.jar`, transported over binary WebSockets, and decoded inside the browser using the W3C **WebCodecs hardware `VideoDecoder`** rendered onto an HTML5 canvas at 60 FPS with sub-100ms latency.
-2. **Direct, Natural Mouse Interaction**:
+2. **Direct, Natural Mouse & Keyboard Interaction**:
    - **Taps / Clicks**: Left-clicking anywhere on the mirrored display translates instantaneously into native Android `MotionEvent.ACTION_DOWN` $\rightarrow$ `ACTION_UP` events at the exact device coordinate.
    - **Click & Drag / Swipes**: Pressing and dragging the mouse streams continuous `ACTION_MOVE` sequences, enabling natural swipes across pages, home screens, and app drawers.
    - **Long Press**: Holding the mouse button down maintains pointer contact without releasing; Android's native `InputDispatcher` detects the hold duration (400–500ms) and triggers native context menus and selection handles.
    - **Mouse Wheel Scrolling**: Mouse wheel deltas are intercepted by Flutter `PointerSignalEvent` and injected as signed scroll floats via `injectScroll`.
-   - **Right-Click**: Suppresses browser context menu and acts as the native Android **Back** button.
-3. **Physical Keyboard Input**:
-   - Canvas is encapsulated in Flutter's `Focus` widget.
-   - Printable letters, numbers, and symbols type directly into the focused Android text view via `scrcpyClient.controller.injectText`.
-   - Navigation keys (`Enter`, `Backspace`, `Tab`, `Escape`, `Delete`, `Arrow Keys`) map directly to `AndroidKeyCode`.
-4. **Responsive Letterbox & Aspect-Ratio Normalization**:
-   - Cursor positions are dynamically mapped from Flutter render box space to native device resolution (`1080x2408`) regardless of browser window resizing, display scaling, or letterboxing.
+   - **Physical Keyboard Typing**: Canvas is encapsulated in Flutter's `Focus` widget. Printable letters, numbers, and symbols type directly into the focused Android text view via `scrcpyClient.controller.injectText`. Navigation keys (`Enter`, `Backspace`, `Tab`, `Escape`, `Delete`, `Arrow Keys`) map directly to `AndroidKeyCode`.
+   - **Prominent Stop Session Button**: Header bar provides a dedicated **"Stop Session"** button to cleanly end sessions on demand.
+3. **Aspect-Ratio & Window Normalization**:
+   - Input coordinates are dynamically mapped from Flutter render box space to native device resolution regardless of browser window resizing, display scaling, or letterboxing.
 
 ### Bonus Requirements (All 5 Implemented & Verified)
 1. **Bonus 1: Dedicated Isolated Instance per User**: Multi-tenant session manager leases distinct devices from `AdbDevicePoolAdapter`. Concurrent users receive isolated video streams, input pipelines, and temporary buffers with zero data leakage.
 2. **Bonus 2: Instance on Demand & Deterministic Teardown**: Devices are allocated only when a WebSocket connects. Upon disconnect or 3-minute idle timeout (`IDLE_TIMEOUT_MS=180000`), scrcpy processes terminate, ADB tunnels close, and devices return to the free pool with zero leaks.
-3. **Bonus 3: Two-Way Clipboard Synchronization**:
-   - PC to Android: `Ctrl+V` or "Paste to Device" injects clipboard text via `setClipboard({ content, paste: true })`.
-   - Android to PC: Listens to `@yume-chan/scrcpy` clipboard stream and synchronizes device text to the computer clipboard via `navigator.clipboard.writeText`.
+3. **Bonus 3: Bidirectional Two-Way Clipboard**:
+   - **PC to Android**: `Ctrl+V` / `Cmd+V` (captured via native DOM `paste` event with zero browser permission prompts) or "Paste to Device" injects clipboard text via `setClipboard({ content, paste: true })` directly into the focused view.
+   - **Android to PC**: Listens to `@yume-chan/scrcpy` clipboard stream and synchronizes device text to the computer clipboard via `navigator.clipboard.writeText(text)` with a 1-click SnackBar fallback copy action.
 4. **Bonus 4: Restricted Access (Kiosk Mode)**:
-   - Locked to **Samsung Calculator** (`com.sec.android.app.popupcalculator`).
-   - Server-side enforcement drops Home, Recents, Power, Volume, status bar pull-downs, and bottom gesture navigation. An active background watchdog (`dumpsys window`) detects unauthorized focus changes and immediately re-launches the Calculator.
-5. **Bonus 5: Automatic Session Recording & Playback**:
-   - Sessions automatically capture raw H.264 NAL units in real time.
-   - On disconnect, FFmpeg muxes the stream into an MP4 container in <500ms (`-c:v copy -movflags +faststart`).
-   - Playback and download available via `/api/recordings` and the in-app Recordings dialog.
+   - **App Chosen**: Native Android Calculator (`com.android.calculator2` / `com.google.android.calculator`).
+   - **Dynamic Discovery**: Backend queries ADB (`pm list packages | grep -i calculator`) to automatically discover and launch the device's native calculator without hardcoding any OEM specifics.
+   - **Server-Side Enforcement**: Server drops Home, Recents, Power, Volume, status bar pull-downs (`y <= 5%`), and bottom gesture navigation (`y >= 95%`). An active background watchdog (`dumpsys window`) checks every 3s and refocuses the Calculator if unauthorized activities gain focus. Client-side tampering is completely bypassed.
+5. **Bonus 5: Automatic Session Recording with Save / Delete Lifecycle**:
+   - Each session is recorded automatically in real time to H.264 and muxed to MP4 via FFmpeg.
+   - When a session ends, the user is prompted: **Save & Download Recording** or **Delete Recording**.
+   - **Constrained 12 GB Disk Protection**: If user chooses Delete or closes the session without saving, recordings are automatically purged after 60 seconds. A periodic pruner (`SessionRecorder.pruneUnsaved()`) sweeps unsaved artifacts every 2 minutes.
+
 
 ---
 
@@ -240,10 +239,26 @@ Click **"Connect"** to initiate your live Android session!
 
 ## 8. Cloud & Server Deployment Instructions
 
-The project is structured for single-command deployment on any Linux cloud VM (AWS EC2, DigitalOcean, Hetzner, GCP) with KVM or connected Android devices:
+The project is structured for single-command deployment on any Linux cloud VM (AWS EC2, DigitalOcean, Hetzner, GCP) with KVM or connected Android devices.
 
-### Option A: Native Linux VM Deployment (Recommended)
-1. **Provision Server**: Ubuntu 22.04 or 24.04 VM.
+### Optimized for Resource-Constrained Servers (2 vCPU, 5–6 GB RAM, ~12 GB Disk)
+This architecture is deliberately designed to scale smoothly on constrained server instances:
+- **Zero CPU Video Transcoding**: The Android device / emulator hardware encoder (`MediaCodec`) encodes screen frames directly to H.264 NAL units. The Node.js server does zero software transcoding, merely forwarding binary buffers directly to WebSockets. CPU load is negligible (< 2% CPU per session).
+- **Constant Memory Footprint**: Continuous stream chunking sends packets immediately to WebSocket clients without buffering entire videos in RAM, keeping Node.js memory < 80 MB.
+- **Strict Disk Space Preservation (12 GB Disk)**:
+  - Users are prompted to **Save or Delete** session recordings upon session completion.
+  - If a session is closed or abandoned without saving, the server's auto-pruning timer automatically purges the files after 60 seconds.
+  - A background pruner (`SessionRecorder.pruneUnsaved()`) periodically checks every 2 minutes to sweep away any unsaved artifacts.
+
+### Option A: Docker Deployment (Recommended)
+Run using the included `Dockerfile` and `docker-compose.yml`:
+```bash
+docker compose up -d --build
+```
+> **Note on Linux Hosts**: `docker-compose.yml` includes `extra_hosts: ["host.docker.internal:host-gateway"]`, allowing the containerized backend to communicate seamlessly with ADB running on the host OS (`host.docker.internal:5037`).
+
+### Option B: Native Linux VM Deployment
+1. **Provision Server**: Ubuntu 22.04 or 24.04 VM (e.g. 2 vCPU, 4–6 GB RAM).
 2. **Install Dependencies**:
    ```bash
    sudo apt-get update
@@ -252,6 +267,7 @@ The project is structured for single-command deployment on any Linux cloud VM (A
 3. **Connect Device / Emulator**:
    - If using a physical device: Connect via USB or remote ADB: `adb connect <device-ip>:5555`.
    - If using Redroid (KVM Docker): `docker run -d --privileged -p 5555:5555 redroid/redroid:12.0.0-latest`.
+   - Or start Android emulator: `emulator -avd <avd-name> -no-window -gpu swiftshader_indirect &`.
 4. **Clone and Run**:
    ```bash
    git clone https://github.com/aavvvacado/andriod_browser_device.git
@@ -261,21 +277,15 @@ The project is structured for single-command deployment on any Linux cloud VM (A
    npm start
    ```
 5. **Reverse Proxy (Optional Caddy / Nginx)**:
-   Point port `80` / `443` to `http://localhost:3000` with WebSocket upgrade enabled.
-
-### Option B: Docker Deployment
-Run using the included `Dockerfile` and `docker-compose.yml`:
-```bash
-docker compose up -d --build
-```
+   Point port `80` / `443` to `http://localhost:3000` with WebSocket upgrade enabled (`Upgrade $http_upgrade`, `Connection "upgrade"`).
 
 ---
 
 ## 9. Feature Testing Guide
 
 ### 1. Test Direct Screen Mirroring & Tap
-- Open `http://localhost:3000` and click **"Connect"**.
-- Click on any app icon (e.g. Settings, Calculator, Chrome).
+- Open `http://localhost:3000` and click **"Start Device Session"**.
+- Click on any app icon on the mirrored Android screen.
 - **Expected**: The app immediately launches on the device and displays in the browser in real time.
 
 ### 2. Test Swipe & Drag
@@ -289,21 +299,28 @@ docker compose up -d --build
 - **Expected**: Keystrokes appear immediately in the focused Android input field.
 
 ### 4. Test Mouse Wheel Scrolling
-- Place cursor over a scrollable list (e.g. Settings menu) and roll mouse wheel.
-- **Expected**: List scrolls vertically.
+- Place cursor over a scrollable list and roll the mouse wheel.
+- **Expected**: List scrolls vertically in real time.
 
-### 5. Test Two-Way Clipboard (Bonus 3)
-- **PC to Android**: Copy text on your PC (`Ctrl+C`), click on the mirrored screen, and press `Ctrl+V` (or click "Paste to Device"). The text appears in Android.
-- **Android to PC**: Select and copy text inside an Android app. A notification toast appears in the browser, and the text is copied to your computer clipboard.
+### 5. Test Two-Way Bidirectional Clipboard (Bonus 3)
+- **PC to Android**: Copy text on your PC (`Ctrl+C`), click on the mirrored screen, and press `Ctrl+V` (or click "Paste to Device"). The DOM paste listener captures the text with zero permission prompts and injects it into Android.
+- **Android to PC**: Copy text inside an Android app. A notification toast appears in the browser, and the text is copied to your computer clipboard via `navigator.clipboard.writeText(text)` (with a 1-click "Copy" action button as fallback).
 
 ### 6. Test Restricted Access / Kiosk Mode (Bonus 4)
-- Click the **"Kiosk Mode"** toggle in the top bar.
-- **Expected**: Samsung Calculator launches automatically. Status bar pull-down, bottom gestures, and Home/Recents keys are dropped. Attempting to leave the app is prevented by the watchdog.
+- Click the **"Kiosk Mode"** toggle in the sidebar.
+- **Expected**:
+  - The native Android Calculator (`com.android.calculator2` / `com.google.android.calculator`) launches automatically.
+  - Status bar pull-down (`y <= 5%`) and bottom navigation gestures (`y >= 95%`) are dropped on the server.
+  - System exit keys (`Home`, `Recents`, `Power`, `Volume`) are dropped on the server.
+  - Attempting to leave the app is detected by the server-side watchdog, which refocuses the Calculator within 3 seconds.
 
-### 7. Test Session Recording (Bonus 5)
-- Interact with the device for 15–30 seconds, then click **"Disconnect"**.
-- Click the **"Recordings"** button in the top bar.
-- **Expected**: The recorded session appears with its duration and file size, with direct in-browser MP4 playback and download options.
+### 7. Test Top "Stop Session" Button & Save/Delete Recording (Bonus 5)
+- Click the red **"Stop Session"** button in the header bar.
+- **Expected**:
+  - The session immediately disconnects and the device is released back to the pool.
+  - A modal dialog appears: **"Session Ended. What would you like to do with the session recording?"**
+  - Click **"Delete Recording"**: The server calls `DELETE /api/recordings/:sessionId` and purges the files, saving server disk space.
+  - Alternatively, click **"Save & Download MP4"**: The recording is marked saved and downloaded to your computer.
 
 ---
 
@@ -313,8 +330,9 @@ Follow this continuous, uncut walkthrough when recording your demo video:
 
 | Time | Action | What to Narrate |
 | :--- | :--- | :--- |
-| **0:00 – 0:45** | **Introduction & Architecture** | Introduce the application. Explain that it uses `scrcpy-server.jar` for low-latency H.264 capture, binary WebSockets for transport, and hardware WebCodecs `VideoDecoder` in Flutter Web. |
-| **0:45 – 1:45** | **Core Screen Interaction** | Click directly on the mirrored display to open an app (e.g. Settings). Click and drag to demonstrate smooth swiping. Roll mouse wheel to demonstrate scrolling. Focus a search box and type directly from your physical keyboard. |
-| **1:45 – 2:30** | **Two-Way Clipboard (Bonus 3)** | Copy text on your PC and paste it into the Android device using `Ctrl+V`. Copy text on the Android device and paste it into a computer text editor to prove two-way synchronization. |
-| **2:30 – 3:30** | **Kiosk Mode (Bonus 4)** | Toggle Kiosk Mode. Show the Calculator launch. Demonstrate attempting to pull down notifications, swipe home, or exit, showing the server-side security enforcement in action. |
-| **3:30 – 4:30** | **Session Recording (Bonus 5)** | Disconnect the session. Open the Recordings dialog. Play back the video recorded during the demo and click Download to inspect the generated MP4. Conclude the video. |
+| **0:00 – 0:45** | **Introduction & Architecture** | Introduce the application. Explain that it uses `scrcpy-server.jar` for low-latency H.264 capture, binary WebSockets for transport, and hardware WebCodecs `VideoDecoder` in Flutter Web. Highlight the constrained 2 vCPU / 5-6 GB / 12 GB disk server scalability. |
+| **0:45 – 1:45** | **Core Screen Interaction** | Click directly on the mirrored display to open an app. Click and drag to demonstrate smooth swiping. Roll mouse wheel to demonstrate scrolling. Focus a search box and type directly from your physical keyboard. Point out the live RTT (~25ms) and FPS (60). |
+| **1:45 – 2:30** | **Two-Way Bidirectional Clipboard (Bonus 3)** | Copy text on your PC and paste it into the Android device using `Ctrl+V`. Copy text on the Android device and paste it into a computer text editor to prove bidirectional synchronization. |
+| **2:30 – 3:30** | **Kiosk Mode (Bonus 4)** | Toggle Kiosk Mode. Show the native Calculator launch. Demonstrate attempting to pull down notifications, swipe home, or exit, showing server-side security enforcement in action. |
+| **3:30 – 4:30** | **Stop Session & Save/Delete Recording (Bonus 5)** | Click the **"Stop Session"** button in the top bar. Show the Save vs Delete modal. Demonstrate downloading the MP4 or deleting it from disk to protect constrained server storage. Conclude the video. |
+

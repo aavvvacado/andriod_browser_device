@@ -46,13 +46,12 @@ class DeviceControlsBar extends StatelessWidget {
                   final newEnabled = !isKiosk;
                   context.read<InputBloc>().add(SendKioskToggleEvent(
                     enabled: newEnabled,
-                    package: 'com.sec.android.app.popupcalculator',
                   ));
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(
                         newEnabled
-                          ? 'Kiosk Mode ENABLED: Restricted to Samsung Calculator'
+                          ? 'Kiosk Mode ENABLED: Restricted to Device Calculator'
                           : 'Kiosk Mode DISABLED: Full device access restored',
                       ),
                       duration: const Duration(seconds: 2),

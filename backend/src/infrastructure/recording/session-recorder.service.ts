@@ -8,6 +8,7 @@ const execAsync = promisify(exec);
 
 export interface SessionRecordingMetadata {
   sessionId: string;
+  clientToken?: string;
   deviceSerial: string;
   deviceModel: string;
   startTime: number;
@@ -17,6 +18,7 @@ export interface SessionRecordingMetadata {
   mp4FilePath?: string;
   fileSizeBytes?: number;
   status: 'recording' | 'completed' | 'failed';
+  saved?: boolean;
 }
 
 export class SessionRecorder {
@@ -30,6 +32,7 @@ export class SessionRecorder {
     private sessionId: string,
     private deviceSerial: string,
     private deviceModel: string,
+    private clientToken: string = '',
     baseDir: string = process.cwd()
   ) {
     this.recordingsDir = path.join(baseDir, 'recordings');
@@ -42,15 +45,17 @@ export class SessionRecorder {
 
     this.metadata = {
       sessionId,
+      clientToken,
       deviceSerial,
       deviceModel,
       startTime: Date.now(),
       rawFilePath,
       status: 'recording',
+      saved: false,
     };
 
     this.saveMetadata();
-    this.logger.info(`Session recording started for ${sessionId} -> ${rawFilePath}`);
+    this.logger.info(`Session recording started for ${sessionId} (client: ${clientToken || 'anonymous'}) -> ${rawFilePath}`);
   }
 
   writePacket(data: Uint8Array): void {
@@ -123,7 +128,88 @@ export class SessionRecorder {
     }
   }
 
-  static listRecordings(baseDir: string = process.cwd()): SessionRecordingMetadata[] {
+  static getMetadata(sessionId: string, baseDir: string = process.cwd()): SessionRecordingMetadata | null {
+    const metaPath = path.join(baseDir, 'recordings', `${sessionId}.json`);
+    if (!fs.existsSync(metaPath)) return null;
+    try {
+      return JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+    } catch {
+      return null;
+    }
+  }
+
+  static saveRecording(sessionId: string, baseDir: string = process.cwd()): SessionRecordingMetadata | null {
+    const dir = path.join(baseDir, 'recordings');
+    const metaPath = path.join(dir, `${sessionId}.json`);
+    if (!fs.existsSync(metaPath)) return null;
+    try {
+      const meta: SessionRecordingMetadata = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+      meta.saved = true;
+      fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+      const logger = new Logger('SessionRecorder');
+      logger.info(`Marked session recording ${sessionId} as permanently SAVED`);
+      return meta;
+    } catch {
+      return null;
+    }
+  }
+
+  static deleteRecording(sessionId: string, baseDir: string = process.cwd()): boolean {
+    const dir = path.join(baseDir, 'recordings');
+    const logger = new Logger('SessionRecorder');
+    let deletedAny = false;
+
+    const filesToDelete = [
+      path.join(dir, `${sessionId}.h264`),
+      path.join(dir, `${sessionId}.mp4`),
+      path.join(dir, `${sessionId}.json`),
+    ];
+
+    for (const f of filesToDelete) {
+      if (fs.existsSync(f)) {
+        try {
+          fs.unlinkSync(f);
+          deletedAny = true;
+        } catch (err: any) {
+          logger.warn(`Could not delete recording file ${f}: ${err.message}`);
+        }
+      }
+    }
+
+    if (deletedAny) {
+      logger.info(`Deleted session recording files for ${sessionId} to reclaim disk space`);
+    }
+    return deletedAny;
+  }
+
+  static pruneUnsaved(maxAgeMs: number = 180000, baseDir: string = process.cwd()): number {
+    const dir = path.join(baseDir, 'recordings');
+    if (!fs.existsSync(dir)) return 0;
+
+    const now = Date.now();
+    let prunedCount = 0;
+    const jsonFiles = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
+
+    for (const jf of jsonFiles) {
+      const metaPath = path.join(dir, jf);
+      try {
+        const meta: SessionRecordingMetadata = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+        const age = now - (meta.startTime || 0);
+        // If not explicitly saved and exceeds maxAgeMs, prune files
+        if (meta.saved !== true && age > maxAgeMs) {
+          SessionRecorder.deleteRecording(meta.sessionId, baseDir);
+          prunedCount++;
+        }
+      } catch {
+        // Corrupt JSON, delete it
+        try { fs.unlinkSync(metaPath); } catch {}
+      }
+    }
+
+    return prunedCount;
+  }
+
+  static listRecordings(baseDir: string = process.cwd(), onlySaved: boolean = false, clientToken?: string): SessionRecordingMetadata[] {
     const dir = path.join(baseDir, 'recordings');
     if (!fs.existsSync(dir)) return [];
 
@@ -133,7 +219,16 @@ export class SessionRecorder {
     for (const f of files) {
       try {
         const content = fs.readFileSync(path.join(dir, f), 'utf-8');
-        list.push(JSON.parse(content));
+        const meta: SessionRecordingMetadata = JSON.parse(content);
+        if (onlySaved && meta.saved !== true) continue;
+
+        // Machine / Client Isolation:
+        // Ensure recordings on server are never visible to users on different machines
+        if (clientToken && meta.clientToken && meta.clientToken !== clientToken) {
+          continue;
+        }
+
+        list.push(meta);
       } catch (_) {}
     }
 

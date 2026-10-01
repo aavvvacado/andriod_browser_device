@@ -41,16 +41,10 @@ class AdbDevicePoolAdapter {
             target = devices.find(d => d.isAvailable);
         }
         if (!target) {
-            // If pool is at maximum capacity
-            if (this.leasedDevices.size >= config_js_1.config.maxSessions) {
-                throw new Error(`Device pool capacity reached (${this.leasedDevices.size}/${config_js_1.config.maxSessions} active sessions)`);
-            }
-            // For single physical device mode, allow sharing the device stream
-            target = devices[0];
-            this.logger.warn(`No exclusive device available; sharing stream of ${target.model} (${target.serial})`);
+            throw new Error(`Device pool capacity reached (${this.leasedDevices.size}/${config_js_1.config.maxSessions} active sessions). All Android devices are currently leased.`);
         }
         this.leasedDevices.add(target.serial);
-        this.logger.info(`Leased device ${target.model} (${target.serial}). Active leases: ${this.leasedDevices.size}`);
+        this.logger.info(`Leased dedicated device ${target.model} (${target.serial}). Active leases: ${this.leasedDevices.size}`);
         return target;
     }
     async releaseDevice(serial) {

@@ -65,6 +65,20 @@ export interface PingEvent {
   clientTime: number;
 }
 
+export interface StopSessionEvent {
+  type: 'stop_session';
+}
+
+export interface SaveRecordingEvent {
+  type: 'save_recording';
+  sessionId?: string;
+}
+
+export interface DeleteRecordingEvent {
+  type: 'delete_recording';
+  sessionId?: string;
+}
+
 export type ClientInputEvent =
   | TouchInputEvent
   | KeyInputEvent
@@ -72,5 +86,8 @@ export type ClientInputEvent =
   | ScrollInputEvent
   | ClipboardInputEvent
   | KioskToggleEvent
-  | PingEvent;
+  | PingEvent
+  | StopSessionEvent
+  | SaveRecordingEvent
+  | DeleteRecordingEvent;
 

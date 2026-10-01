@@ -8,14 +8,24 @@ services:
     container_name: android_browser_device
     ports:
       - "3000:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - PORT=3000
       - ADB_HOST=host.docker.internal
       - ADB_PORT=5037
       - MAX_SESSIONS=3
       - IDLE_TIMEOUT_MS=180000
-      - MAX_VIDEO_BITRATE=4000000
+      - MAX_VIDEO_BITRATE=3000000
       - MAX_VIDEO_SIZE=1080
     volumes:
       - ./backend/recordings:/app/backend/recordings
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 2048M
+        reservations:
+          cpus: '0.2'
+          memory: 256M

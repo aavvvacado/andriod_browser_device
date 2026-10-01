@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.WebSocketGateway = void 0;
 const ws_1 = require("ws");
+const crypto_1 = require("crypto");
 const logger_js_1 = require("../../core/logger.js");
 class WebSocketGateway {
     sessionManager;
@@ -14,11 +15,13 @@ class WebSocketGateway {
     }
     setupListeners() {
         this.wss.on('connection', async (ws, req) => {
-            const clientId = `client_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+            const clientId = (0, crypto_1.randomUUID)();
+            const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+            const clientToken = url.searchParams.get('clientToken') || req.headers['x-client-token'] || '';
             const ip = req.socket.remoteAddress;
-            this.logger.info(`New WebSocket client connected: ${clientId} from ${ip}`);
+            this.logger.info(`New WebSocket client connected: ${clientId} (token: ${clientToken || 'none'}) from ${ip}`);
             try {
-                await this.sessionManager.handleClientConnected(clientId, ws);
+                await this.sessionManager.handleClientConnected(clientId, ws, clientToken);
                 ws.on('message', async (data) => {
                     try {
                         const raw = data.toString();

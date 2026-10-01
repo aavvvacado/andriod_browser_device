@@ -1,5 +1,6 @@
 import { Server as HttpServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
+import { randomUUID } from 'crypto';
 import { SessionManagerService } from '../../application/services/session-manager.service.js';
 import { ClientInputEvent } from '../../domain/entities/input-event.js';
 import { Logger } from '../../core/logger.js';
@@ -18,12 +19,14 @@ export class WebSocketGateway {
 
   private setupListeners(): void {
     this.wss.on('connection', async (ws: WebSocket, req) => {
-      const clientId = `client_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const clientId = randomUUID();
+      const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+      const clientToken = url.searchParams.get('clientToken') || (req.headers['x-client-token'] as string) || '';
       const ip = req.socket.remoteAddress;
-      this.logger.info(`New WebSocket client connected: ${clientId} from ${ip}`);
+      this.logger.info(`New WebSocket client connected: ${clientId} (token: ${clientToken || 'none'}) from ${ip}`);
 
       try {
-        await this.sessionManager.handleClientConnected(clientId, ws);
+        await this.sessionManager.handleClientConnected(clientId, ws, clientToken);
 
         ws.on('message', async (data: Buffer | string) => {
           try {

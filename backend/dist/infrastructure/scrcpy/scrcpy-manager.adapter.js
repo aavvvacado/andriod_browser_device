@@ -17,7 +17,7 @@ class ScrcpySessionAdapter {
     isPointerDown = false;
     isBlockedGesture = false;
     _isKioskMode = false;
-    allowedPackage = 'com.sec.android.app.popupcalculator';
+    allowedPackage = 'com.android.calculator2';
     clipboardCallback = null;
     constructor(metadata, scrcpyClient, packetStream) {
         this.metadata = metadata;

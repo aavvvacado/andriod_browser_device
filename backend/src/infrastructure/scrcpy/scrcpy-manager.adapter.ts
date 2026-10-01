@@ -13,7 +13,7 @@ export class ScrcpySessionAdapter implements IScrcpySession {
   private isPointerDown: boolean = false;
   private isBlockedGesture: boolean = false;
   private _isKioskMode: boolean = false;
-  private allowedPackage: string = 'com.sec.android.app.popupcalculator';
+  private allowedPackage: string = 'com.android.calculator2';
   private clipboardCallback: ((text: string) => void) | null = null;
 
   constructor(

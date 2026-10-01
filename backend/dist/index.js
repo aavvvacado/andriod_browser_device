@@ -7,6 +7,7 @@ const scrcpy_manager_adapter_js_1 = require("./infrastructure/scrcpy/scrcpy-mana
 const session_manager_service_js_1 = require("./application/services/session-manager.service.js");
 const http_server_js_1 = require("./interfaces/http/http.server.js");
 const websocket_gateway_js_1 = require("./interfaces/websocket/websocket.gateway.js");
+const session_recorder_service_js_1 = require("./infrastructure/recording/session-recorder.service.js");
 const logger = new logger_js_1.Logger('AppBootstrap');
 async function bootstrap() {
     logger.info('Initializing Real-Time Android Browser Streaming Backend...');
@@ -28,9 +29,15 @@ async function bootstrap() {
         logger.info(`WebSocket Gateway: ws://localhost:${config_js_1.config.port}`);
         logger.info(`=======================================================`);
     });
+    // 4b. Background disk space protector: prune unsaved/abandoned recordings
+    session_recorder_service_js_1.SessionRecorder.pruneUnsaved();
+    const prunerInterval = setInterval(() => {
+        session_recorder_service_js_1.SessionRecorder.pruneUnsaved();
+    }, 120000);
     // 5. Graceful shutdown handler
     const shutdown = async (signal) => {
         logger.info(`Received ${signal}. Initiating graceful termination...`);
+        clearInterval(prunerInterval);
         httpServer.close();
         await sessionManager.terminateAll();
         logger.info('Graceful shutdown completed.');

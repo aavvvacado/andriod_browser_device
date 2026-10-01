@@ -35,15 +35,48 @@ interface ActiveClientSession {
 export class SessionManagerService {
   private logger = new Logger('SessionManagerService');
   private sessions: Map<string, ActiveClientSession> = new Map();
-  private defaultKioskPackage = 'com.sec.android.app.popupcalculator';
+  private defaultKioskPackage = 'com.android.calculator2';
 
   constructor(
     private devicePool: IDevicePoolRepository,
     private scrcpyManager: IScrcpyManager
   ) {}
 
-  async handleClientConnected(clientId: string, socket: any): Promise<DeviceSession> {
-    this.logger.info(`Starting dedicated on-demand session for client: ${clientId}...`);
+  private async detectDeviceCalculator(serial: string): Promise<string> {
+    const candidates = [
+      'com.google.android.calculator',
+      'com.android.calculator2',
+      'com.android.calculator',
+      'com.sec.android.app.popupcalculator',
+    ];
+
+    try {
+      const { stdout } = await execAsync(`adb -s ${serial} shell "pm list packages | grep -i calculator || true"`);
+      const installed = stdout
+        .split('\n')
+        .map(line => line.trim().replace(/^package:/, ''))
+        .filter(Boolean);
+
+      for (const candidate of candidates) {
+        if (installed.includes(candidate)) {
+          this.logger.info(`Detected calculator package on ${serial}: ${candidate}`);
+          return candidate;
+        }
+      }
+
+      if (installed.length > 0) {
+        this.logger.info(`Detected generic calculator package on ${serial}: ${installed[0]}`);
+        return installed[0];
+      }
+    } catch (err: any) {
+      this.logger.warn(`Failed detecting calculator package on ${serial}, falling back to default: ${err.message}`);
+    }
+
+    return 'com.android.calculator2';
+  }
+
+  async handleClientConnected(clientId: string, socket: any, clientToken: string = ''): Promise<DeviceSession> {
+    this.logger.info(`Starting dedicated on-demand session for client: ${clientId} (token: ${clientToken})...`);
 
     // 1. Lease dedicated isolated device from pool
     const device = await this.devicePool.leaseDevice();
@@ -53,7 +86,10 @@ export class SessionManagerService {
 
     const sessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const broadcaster = new WebSocketStreamBroadcaster();
-    const recorder = new SessionRecorder(sessionId, device.serial, device.model);
+    const recorder = new SessionRecorder(sessionId, device.serial, device.model, clientToken);
+
+    // Detect installed calculator package dynamically
+    const detectedKioskPackage = await this.detectDeviceCalculator(device.serial);
 
     const session: ActiveClientSession = {
       sessionId,
@@ -71,7 +107,7 @@ export class SessionManagerService {
         height: scrcpySession.metadata.height,
       },
       kioskEnabled: false,
-      kioskPackage: this.defaultKioskPackage,
+      kioskPackage: detectedKioskPackage,
       broadcastActive: true,
     };
 
@@ -88,13 +124,14 @@ export class SessionManagerService {
       }
     });
 
-    // 4. Send init packet FIRST to client
+    // 4. Send init packet FIRST to client with dynamic calculator package info
     socket.send(JSON.stringify({
       type: 'init',
       sessionId: session.sessionId,
       deviceModel: session.deviceModel,
       width: session.resolution.width,
       height: session.resolution.height,
+      kioskPackage: session.kioskPackage,
     }));
 
     // 5. Register client in broadcaster
@@ -169,6 +206,31 @@ export class SessionManagerService {
           // Bonus 4: Restricted access toggle
           await this.setKioskMode(session, event.enabled, event.package);
           break;
+
+        case 'stop_session':
+          this.logger.info(`Client ${clientId} requested explicit stop_session.`);
+          await this.terminateClientSession(session);
+          break;
+
+        case 'save_recording': {
+          const targetId = event.sessionId || session.sessionId;
+          this.logger.info(`Client ${clientId} saved recording for ${targetId}`);
+          SessionRecorder.saveRecording(targetId);
+          if (session.socket.readyState === 1) {
+            session.socket.send(JSON.stringify({ type: 'recording_saved', sessionId: targetId }));
+          }
+          break;
+        }
+
+        case 'delete_recording': {
+          const targetId = event.sessionId || session.sessionId;
+          this.logger.info(`Client ${clientId} requested deletion of recording for ${targetId}`);
+          SessionRecorder.deleteRecording(targetId);
+          if (session.socket.readyState === 1) {
+            session.socket.send(JSON.stringify({ type: 'recording_deleted', sessionId: targetId }));
+          }
+          break;
+        }
       }
     } catch (err: any) {
       this.logger.error(`Error injecting input event ${event.type}:`, err?.message || err);
@@ -312,17 +374,40 @@ export class SessionManagerService {
       this.logger.warn(`Failed releasing device: ${err.message}`);
     }
 
-    // Clean up client socket if open
+    // Clean up client socket and send session_ended event
+    const endedSessionId = session.sessionId;
     try {
       session.broadcaster.unregisterClient(session.clientId);
       if (session.socket.readyState === 1) {
-        session.socket.send(JSON.stringify({ type: 'session_ended', sessionId: session.sessionId }));
-        session.socket.close();
+        session.socket.send(JSON.stringify({
+          type: 'session_ended',
+          sessionId: endedSessionId,
+          deviceModel: session.deviceModel,
+          recordingUrl: `/api/recordings/${endedSessionId}`,
+        }));
+        // Give client a moment to receive the message before closing socket
+        setTimeout(() => {
+          try {
+            if (session.socket.readyState === 1) {
+              session.socket.close();
+            }
+          } catch (_) {}
+        }, 3000);
       }
     } catch (_) {}
 
+    // Auto-prune unsaved recording if session closed abandoned
+    // If the recording is not saved within 60 seconds, delete it to prevent filling disk
+    setTimeout(() => {
+      const meta = SessionRecorder.getMetadata(endedSessionId);
+      if (meta && meta.saved !== true) {
+        this.logger.info(`Auto-pruning unsaved recording for ended session ${endedSessionId} to protect disk space`);
+        SessionRecorder.deleteRecording(endedSessionId);
+      }
+    }, 60000);
+
     this.sessions.delete(session.clientId);
-    this.logger.info(`Session ${session.sessionId} cleanly terminated and all resources freed.`);
+    this.logger.info(`Session ${endedSessionId} cleanly terminated and all resources freed.`);
   }
 
   async terminateAll(): Promise<void> {

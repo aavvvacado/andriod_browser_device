@@ -76,6 +76,23 @@ class SessionHeaderBar extends StatelessWidget {
                       _buildMetricBadge('FPS', '${latencyState.fps}', AppTheme.success),
                       const SizedBox(width: 12),
                       _buildMetricBadge('Res', resText, AppTheme.textSecondary),
+                      if (isConnected) ...[
+                        const SizedBox(width: 16),
+                        ElevatedButton.icon(
+                          onPressed: () {
+                            context.read<SessionBloc>().add(StopSessionEvent());
+                          },
+                          icon: const Icon(Icons.stop_circle_rounded, size: 16, color: Colors.white),
+                          label: const Text('Stop Session', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.danger,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            elevation: 0,
+                          ),
+                        ),
+                      ],
                     ],
                   );
                 },
