@@ -206,10 +206,25 @@ export class ScrcpySessionAdapter implements IScrcpySession {
   async setClipboard(text: string): Promise<void> {
     if (!this.scrcpyClient.controller || !text) return;
     this.logger.info(`Setting Android clipboard from browser (${text.length} chars)`);
-    await this.scrcpyClient.controller.setClipboard({
-      content: text,
-      paste: true, // Auto-paste into focused application
-    });
+    try {
+      await this.scrcpyClient.controller.setClipboard({
+        content: text,
+        paste: true, // Auto-paste into focused application
+      });
+    } catch (err: any) {
+      this.logger.warn(`setClipboard error: ${err?.message || err}`);
+    }
+
+    // Direct injection fallback: if text is single-line or numeric/alphanumeric (up to 500 chars),
+    // inject it directly into the active Android view so apps like Calculator, Search, or custom EditTexts
+    // visibly receive the pasted characters immediately even if they don't implement KEYCODE_PASTE.
+    if (text.length <= 500 && !text.includes('\n')) {
+      try {
+        await this.scrcpyClient.controller.injectText(text);
+      } catch (err: any) {
+        this.logger.debug(`injectText direct paste fallback note: ${err?.message || err}`);
+      }
+    }
   }
 
   async close(): Promise<void> {

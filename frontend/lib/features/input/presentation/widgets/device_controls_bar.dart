@@ -74,10 +74,11 @@ class DeviceControlsBar extends StatelessWidget {
                     final text = textJS.toDart;
                     if (text.isNotEmpty && context.mounted) {
                       context.read<InputBloc>().add(SendClipboardEvent(text));
+                      final preview = text.length > 30 ? '${text.substring(0, 30)}...' : text;
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          content: Text('Pasted "$text" to Android'),
-                          duration: const Duration(seconds: 1),
+                          content: Text('Pasted "$preview" (${text.length} chars) to Android'),
+                          duration: const Duration(seconds: 2),
                           behavior: SnackBarBehavior.floating,
                         ),
                       );
