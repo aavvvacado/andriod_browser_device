@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Android Browser Stream (Spike)</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+    body {
+      background: #0f172a;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      max-width: 900px;
+      padding: 12px 20px;
+      background: rgba(30, 41, 59, 0.7);
+      backdrop-filter: blur(10px);
+      border-radius: 12px;
+      margin-bottom: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .device-title {
+      font-weight: 600;
+      font-size: 1.1rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #ef4444;
+    }
+    .status-dot.active {
+      background: #22c55e;
+      box-shadow: 0 0 10px #22c55e;
+    }
+    .metrics {
+      display: flex;
+      gap: 16px;
+      font-size: 0.9rem;
+      font-family: monospace;
+    }
+    .metric-badge {
+      background: rgba(15, 23, 42, 0.6);
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .main-stage {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+    .phone-frame {
+      position: relative;
+      background: #000;
+      border: 4px solid #334155;
+      border-radius: 28px;
+      overflow: hidden;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      max-height: 80vh;
+      aspect-ratio: 9 / 20;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      cursor: crosshair;
+    }
+    .controls-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      background: rgba(30, 41, 59, 0.8);
+      padding: 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .btn {
+      background: #1e293b;
+      color: #f8fafc;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.15s ease;
+    }
+    .btn:hover {
+      background: #334155;
+      border-color: #38bdf8;
+      transform: translateY(-1px);
+    }
+    .btn:active {
+      transform: translateY(1px);
+    }
+    .btn-primary {
+      background: #0284c7;
+      border-color: #38bdf8;
+    }
+    .btn-primary:hover {
+      background: #0369a1;
+    }
+    .loading-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(15, 23, 42, 0.85);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      font-size: 0.95rem;
+      color: #94a3b8;
+    }
+    .spinner {
+      width: 32px;
+      height: 32px;
+      border: 3px solid rgba(255, 255, 255, 0.1);
+      border-top-color: #38bdf8;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="device-title">
+      <div id="statusDot" class="status-dot"></div>
+      <span id="deviceName">Connecting to Android Device...</span>
+    </div>
+    <div class="metrics">
+      <div class="metric-badge">RTT: <span id="rttVal" style="color: #38bdf8;">--</span> ms</div>
+      <div class="metric-badge">FPS: <span id="fpsVal" style="color: #4ade80;">--</span></div>
+      <div class="metric-badge">Res: <span id="resVal">--</span></div>
+    </div>
+  </div>
+
+  <div class="main-stage">
+    <div class="phone-frame" id="phoneFrame">
+      <canvas id="screenCanvas"></canvas>
+      <div id="loadingOverlay" class="loading-overlay">
+        <div class="spinner"></div>
+        <div id="loadingText">Initializing Scrcpy Server...</div>
+      </div>
+    </div>
+
+    <div class="controls-panel">
+      <button class="btn" id="btnBack" title="Back (Android Back Key)">
+        ◀ Back
+      </button>
+      <button class="btn btn-primary" id="btnHome" title="Home (Android Home Key)">
+        ● Home
+      </button>
+      <button class="btn" id="btnRecents" title="Recents (App Switcher)">
+        ■ Recents
+      </button>
+      <button class="btn" id="btnPower" title="Power Button">
+        ⚡ Power
+      </button>
+      <button class="btn" id="btnVolUp" title="Volume Up">
+        ▲ Vol +
+      </button>
+      <button class="btn" id="btnVolDown" title="Volume Down">
+        ▼ Vol -
+      </button>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('screenCanvas');
+    const ctx = canvas.getContext('2d');
+    const phoneFrame = document.getElementById('phoneFrame');
+    const statusDot = document.getElementById('statusDot');
+    const deviceName = document.getElementById('deviceName');
+    const rttVal = document.getElementById('rttVal');
+    const fpsVal = document.getElementById('fpsVal');
+    const resVal = document.getElementById('resVal');
+    const loadingOverlay = document.getElementById('loadingOverlay');
+
+    let ws = null;
+    let decoder = null;
+    let configData = null;
+    let isConfigured = false;
+    let deviceWidth = 0;
+    let deviceHeight = 0;
+
+    // Performance metrics
+    let frameCount = 0;
+    let lastFpsTime = performance.now();
+    let currentFps = 0;
+
+    function initWebSocket() {
+      const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
+      ws = new WebSocket(wsUrl);
+      ws.binaryType = 'arraybuffer';
+
+      ws.onopen = () => {
+        statusDot.classList.add('active');
+        console.log('Connected to WebSocket server');
+      };
+
+      ws.onclose = () => {
+        statusDot.classList.remove('active');
+        deviceName.innerText = 'Disconnected from Server';
+        loadingOverlay.style.display = 'flex';
+        loadingOverlay.innerHTML = '<div style="color: #ef4444;">Disconnected. Retrying in 2s...</div>';
+        setTimeout(initWebSocket, 2000);
+      };
+
+      ws.onmessage = (event) => {
+        if (typeof event.data === 'string') {
+          // JSON control/init message
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'init') {
+            deviceWidth = msg.width;
+            deviceHeight = msg.height;
+            deviceName.innerText = msg.model || 'Android Device';
+            resVal.innerText = `${deviceWidth}x${deviceHeight}`;
+            phoneFrame.style.aspectRatio = `${deviceWidth} / ${deviceHeight}`;
+            canvas.width = deviceWidth;
+            canvas.height = deviceHeight;
+          } else if (msg.type === 'config') {
+            const rawStr = atob(msg.rawConfig);
+            configData = new Uint8Array(rawStr.length);
+            for (let i = 0; i < rawStr.length; i++) {
+              configData[i] = rawStr.charCodeAt(i);
+            }
+            isConfigured = false;
+            console.log('Received config for codec:', msg.codec, 'length:', configData.byteLength);
+
+            if (!decoder || decoder.state === 'closed') {
+              decoder = createDecoder();
+            }
+
+            try {
+              decoder.configure({
+                codec: msg.codec || 'avc1.42001f',
+                optimizeForLatency: true,
+                hardwareAcceleration: 'prefer-hardware'
+              });
+            } catch (err) {
+              console.error('Decoder configure error:', err);
+            }
+          } else if (msg.type === 'pong') {
+            const now = performance.now();
+            const rtt = Math.round(now - msg.clientTime);
+            rttVal.innerText = rtt;
+          }
+        } else if (event.data instanceof ArrayBuffer) {
+          handleBinaryPacket(event.data);
+        }
+      };
+    }
+
+    function createDecoder() {
+      if (!('VideoDecoder' in window)) {
+        alert('WebCodecs VideoDecoder API is not supported in this browser. Please use Chrome/Edge/Safari 16.4+');
+        return null;
+      }
+
+      return new VideoDecoder({
+        output: (frame) => {
+          if (loadingOverlay.style.display !== 'none') {
+            loadingOverlay.style.display = 'none';
+          }
+          canvas.width = frame.displayWidth;
+          canvas.height = frame.displayHeight;
+          ctx.drawImage(frame, 0, 0);
+          frame.close();
+
+          frameCount++;
+          const now = performance.now();
+          if (now - lastFpsTime >= 1000) {
+            currentFps = Math.round((frameCount * 1000) / (now - lastFpsTime));
+            fpsVal.innerText = currentFps;
+            frameCount = 0;
+            lastFpsTime = now;
+          }
+        },
+        error: (err) => {
+          console.error('VideoDecoder error:', err);
+        }
+      });
+    }
+
+    decoder = createDecoder();
+
+    function handleBinaryPacket(buffer) {
+      const view = new DataView(buffer);
+      const packetType = view.getUint8(0);
+
+      if (packetType === 0x02) {
+        // Video data packet
+        const isKey = view.getUint8(1) === 1;
+        let pts = Number(view.getBigInt64(2));
+        if (!pts || pts < 0) pts = Math.round(performance.now() * 1000);
+
+        const rawVideo = new Uint8Array(buffer, 10);
+
+        if (!decoder || decoder.state !== 'configured') {
+          return;
+        }
+
+        try {
+          if (!isConfigured) {
+            if (configData) {
+              // Combine SPS/PPS with first keyframe
+              const combined = new Uint8Array(configData.byteLength + rawVideo.byteLength);
+              combined.set(configData, 0);
+              combined.set(rawVideo, configData.byteLength);
+
+              decoder.decode(new EncodedVideoChunk({
+                type: 'key',
+                timestamp: pts,
+                data: combined
+              }));
+              isConfigured = true;
+            }
+          } else {
+            // Drop delta frames if queue is overflowing to maintain sub-50ms latency
+            if (isKey && decoder.decodeQueueSize > 2) {
+              decoder.reset();
+              decoder.configure({
+                codec: 'avc1.42001f',
+                optimizeForLatency: true,
+                hardwareAcceleration: 'prefer-hardware'
+              });
+              isConfigured = false;
+              return;
+            }
+
+            decoder.decode(new EncodedVideoChunk({
+              type: isKey ? 'key' : 'delta',
+              timestamp: pts,
+              data: rawVideo
+            }));
+          }
+        } catch (e) {
+          console.error('Decode failed:', e);
+        }
+      }
+    }
+
+    // Touch and Mouse Coordinate Normalizer
+    function getDeviceCoords(e) {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+      let x = (clientX - rect.left) * scaleX;
+      let y = (clientY - rect.top) * scaleY;
+
+      x = Math.max(0, Math.min(canvas.width, x));
+      y = Math.max(0, Math.min(canvas.height, y));
+
+      return { x, y };
+    }
+
+    let isPointerDown = false;
+
+    function sendTouch(action, x, y) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'touch',
+          action: action,
+          x: x,
+          y: y
+        }));
+      }
+    }
+
+    canvas.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      isPointerDown = true;
+      canvas.setPointerCapture(e.pointerId);
+      const { x, y } = getDeviceCoords(e);
+      sendTouch('down', x, y);
+    });
+
+    canvas.addEventListener('pointermove', (e) => {
+      if (!isPointerDown) return;
+      e.preventDefault();
+      const { x, y } = getDeviceCoords(e);
+      sendTouch('move', x, y);
+    });
+
+    function handlePointerUp(e) {
+      if (!isPointerDown) return;
+      isPointerDown = false;
+      const { x, y } = getDeviceCoords(e);
+      sendTouch('up', x, y);
+    }
+
+    canvas.addEventListener('pointerup', handlePointerUp);
+    canvas.addEventListener('pointercancel', handlePointerUp);
+
+    // Hardware buttons
+    function sendKey(keyName) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'key',
+          key: keyName
+        }));
+      }
+    }
+
+    document.getElementById('btnBack').onclick = () => sendKey('Back');
+    document.getElementById('btnHome').onclick = () => sendKey('Home');
+    document.getElementById('btnRecents').onclick = () => sendKey('Recents');
+    document.getElementById('btnPower').onclick = () => sendKey('Power');
+    document.getElementById('btnVolUp').onclick = () => sendKey('VolumeUp');
+    document.getElementById('btnVolDown').onclick = () => sendKey('VolumeDown');
+
+    // Keyboard support: forward typing
+    window.addEventListener('keydown', (e) => {
+      if (e.target.tagName === 'INPUT') return;
+      if (e.key === 'Backspace') {
+        sendKey('Back');
+      } else if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'text',
+            text: e.key
+          }));
+        }
+      }
+    });
+
+    // Latency Ping Loop (Every 500ms)
+    setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'ping',
+          clientTime: performance.now()
+        }));
+      }
+    }, 500);
+
+    // Bootstrap
+    initWebSocket();
+  </script>
+</body>
+</html>

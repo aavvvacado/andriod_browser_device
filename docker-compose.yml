@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  android-browser-device:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: android_browser_device
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - ADB_HOST=host.docker.internal
+      - ADB_PORT=5037
+      - MAX_SESSIONS=3
+      - IDLE_TIMEOUT_MS=180000
+      - MAX_VIDEO_BITRATE=4000000
+      - MAX_VIDEO_SIZE=1080
+    volumes:
+      - ./backend/recordings:/app/backend/recordings
+    restart: unless-stopped
