@@ -88,32 +88,44 @@ class _DeviceSessionScreenState extends State<DeviceSessionScreen> {
         }
       },
       child: Scaffold(
-        body: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-            child: Column(
-              children: [
-                // Top Header Bar with Live Telemetry
-                const SessionHeaderBar(),
-                const SizedBox(height: 16),
+        backgroundColor: AppTheme.background,
+        body: Container(
+          decoration: const BoxDecoration(
+            gradient: RadialGradient(
+              center: Alignment(0.0, -0.15),
+              radius: 1.3,
+              colors: [
+                Color(0xFF131929), // Subtle studio backlight bloom behind phone
+                Color(0xFF080B12), // Midnight obsidian background
+              ],
+            ),
+          ),
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              child: Column(
+                children: [
+                  // Top Header Bar with Live Telemetry
+                  const SessionHeaderBar(),
+                  const SizedBox(height: 10),
 
-                // Main Interactive Device Stage
-                Expanded(
-                  child: BlocBuilder<SessionBloc, SessionState>(
-                    builder: (context, state) {
-                      if (state is SessionConnected) {
-                        return Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            // Interactive Screen View
-                            DeviceScreenView(metadata: state.metadata),
-                            const SizedBox(width: 24),
+                  // Main Interactive Device Stage
+                  Expanded(
+                    child: BlocBuilder<SessionBloc, SessionState>(
+                      builder: (context, state) {
+                        if (state is SessionConnected) {
+                          return Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              // Interactive Screen View (Takes full vertical space)
+                              DeviceScreenView(metadata: state.metadata),
+                              const SizedBox(width: 20),
 
-                            // Hardware Controls Bar
-                            const DeviceControlsBar(),
-                          ],
-                        );
+                              // Hardware Controls Studio Dock
+                              const DeviceControlsBar(),
+                            ],
+                          );
                       } else if (state is SessionConnecting) {
                         return const Center(
                           child: Column(
@@ -176,7 +188,8 @@ class _DeviceSessionScreenState extends State<DeviceSessionScreen> {
           ),
         ),
       ),
-    );
+    ),
+  );
   }
 
   Widget _buildSessionEndedCard(BuildContext context, SessionEnded state) {

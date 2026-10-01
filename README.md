@@ -101,22 +101,22 @@ flowchart TD
         ActiveApp["Active Foreground App (e.g. Settings, Calculator, Chrome)"]
     end
 
-    PointerListener -->|Normalized Coordinates| WS
-    KeyboardFocus -->|Keycode & Text Events| WS
+    PointerListener -->|"Normalized Coordinates"| WS
+    KeyboardFocus -->|"Keycode and Text Events"| WS
     WS --> SessionMgr
     SessionMgr --> ScrcpyAdapter
     SessionMgr --> Broadcaster
     SessionMgr --> Recorder
     SessionMgr --> Watchdog
 
-    ScrcpyAdapter -->|injectTouch / injectKey / injectText| InputDispatcher
+    ScrcpyAdapter -->|"injectTouch / injectKey / injectText"| InputDispatcher
     InputDispatcher --> ActiveApp
 
-    ActiveApp -->|Display Surface| ScrcpyServer
-    ScrcpyServer -->|Raw H.264 NAL Chunks| Broadcaster
-    Broadcaster -->|Binary WebSocket Frame| Decoder
-    Decoder -->|VideoFrame Bitmap (0 Copy)| Canvas
-    Recorder -->|Mux MP4 on Session End| StaticServer
+    ActiveApp -->|"Display Surface"| ScrcpyServer
+    ScrcpyServer -->|"Raw H.264 NAL Chunks"| Broadcaster
+    Broadcaster -->|"Binary WebSocket Frame"| Decoder
+    Decoder -->|"VideoFrame Bitmap (Zero-Copy)"| Canvas
+    Recorder -->|"Mux MP4 on Session End"| StaticServer
 ```
 
 ### 1. How the Screen Reaches the Browser

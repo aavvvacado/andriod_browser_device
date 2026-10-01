@@ -12,6 +12,7 @@ import '../../../session/domain/entities/device_session.dart';
 import '../../../session/domain/repositories/session_repository.dart';
 import '../../../latency/presentation/bloc/latency_bloc.dart';
 import '../bloc/input_bloc.dart';
+import '../../../../core/utils/coordinate_normalizer.dart';
 import '../../../../core/theme/app_theme.dart';
 
 class DeviceScreenView extends StatefulWidget {
@@ -76,7 +77,7 @@ class _DeviceScreenViewState extends State<DeviceScreenView> {
     _canvas.style.width = '100%';
     _canvas.style.height = '100%';
     _canvas.style.display = 'block';
-    _canvas.style.objectFit = 'contain';
+    _canvas.style.objectFit = 'fill';
     _canvas.style.touchAction = 'none';
     _canvas.style.cursor = 'default';
     _canvas.style.userSelect = 'none';
@@ -103,13 +104,16 @@ class _DeviceScreenViewState extends State<DeviceScreenView> {
     final double videoWidth = widget.metadata.width > 0 ? widget.metadata.width.toDouble() : 1080.0;
     final double videoHeight = widget.metadata.height > 0 ? widget.metadata.height.toDouble() : 2408.0;
 
-    final double normX = (localPos.dx * (videoWidth / box.size.width)).clamp(0.0, videoWidth);
-    final double normY = (localPos.dy * (videoHeight / box.size.height)).clamp(0.0, videoHeight);
+    final norm = CoordinateNormalizer.normalize(
+      localPosition: localPos,
+      renderedSize: box.size,
+      deviceResolution: Size(videoWidth, videoHeight),
+    );
 
     context.read<InputBloc>().add(SendTouchEvent(
       action: action,
-      x: normX,
-      y: normY,
+      x: norm.dx,
+      y: norm.dy,
       screenWidth: videoWidth,
       screenHeight: videoHeight,
     ));
@@ -122,12 +126,15 @@ class _DeviceScreenViewState extends State<DeviceScreenView> {
     final double videoWidth = widget.metadata.width > 0 ? widget.metadata.width.toDouble() : 1080.0;
     final double videoHeight = widget.metadata.height > 0 ? widget.metadata.height.toDouble() : 2408.0;
 
-    final double normX = (localPos.dx * (videoWidth / box.size.width)).clamp(0.0, videoWidth);
-    final double normY = (localPos.dy * (videoHeight / box.size.height)).clamp(0.0, videoHeight);
+    final norm = CoordinateNormalizer.normalize(
+      localPosition: localPos,
+      renderedSize: box.size,
+      deviceResolution: Size(videoWidth, videoHeight),
+    );
 
     context.read<InputBloc>().add(SendScrollEvent(
-      x: normX,
-      y: normY,
+      x: norm.dx,
+      y: norm.dy,
       distanceX: dx,
       distanceY: dy,
       screenWidth: videoWidth,
@@ -300,142 +307,241 @@ class _DeviceScreenViewState extends State<DeviceScreenView> {
   Widget build(BuildContext context) {
     final double aspectRatio = widget.metadata.aspectRatio;
 
-    return Center(
-      child: Container(
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height * 0.82,
-        ),
-        child: AspectRatio(
-          aspectRatio: aspectRatio,
-          child: Focus(
-            focusNode: _focusNode,
-            autofocus: true,
-            onKeyEvent: (FocusNode node, KeyEvent event) {
-              if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Fit available height gracefully (up to 95% of available stage height)
+        final double availableHeight = constraints.maxHeight;
+        final double phoneHeight = availableHeight > 0 ? (availableHeight * 0.95) : 750.0;
 
-              // Clipboard paste shortcut Ctrl+V / Cmd+V
-              if ((HardwareKeyboard.instance.isControlPressed || HardwareKeyboard.instance.isMetaPressed) &&
-                  event.logicalKey == LogicalKeyboardKey.keyV) {
-                _readAndSendClipboard();
-                return KeyEventResult.handled;
-              }
+        return Center(
+          child: SizedBox(
+            height: phoneHeight,
+            child: AspectRatio(
+              aspectRatio: aspectRatio,
+              child: Focus(
+                focusNode: _focusNode,
+                autofocus: true,
+                onKeyEvent: (FocusNode node, KeyEvent event) {
+                  if (event is! KeyDownEvent) return KeyEventResult.ignored;
 
-              // Special Android hardware & navigation keys
-              final keyMap = <LogicalKeyboardKey, String>{
-                LogicalKeyboardKey.backspace: 'Backspace',
-                LogicalKeyboardKey.enter: 'Enter',
-                LogicalKeyboardKey.numpadEnter: 'Enter',
-                LogicalKeyboardKey.tab: 'Tab',
-                LogicalKeyboardKey.escape: 'Back', // Escape operates as Android Back
-                LogicalKeyboardKey.delete: 'Delete',
-                LogicalKeyboardKey.arrowUp: 'ArrowUp',
-                LogicalKeyboardKey.arrowDown: 'ArrowDown',
-                LogicalKeyboardKey.arrowLeft: 'ArrowLeft',
-                LogicalKeyboardKey.arrowRight: 'ArrowRight',
-              };
+                  // Clipboard paste shortcut Ctrl+V / Cmd+V
+                  if ((HardwareKeyboard.instance.isControlPressed || HardwareKeyboard.instance.isMetaPressed) &&
+                      event.logicalKey == LogicalKeyboardKey.keyV) {
+                    _readAndSendClipboard();
+                    return KeyEventResult.handled;
+                  }
 
-              if (keyMap.containsKey(event.logicalKey)) {
-                context.read<InputBloc>().add(SendKeyEvent(keyMap[event.logicalKey]!));
-                return KeyEventResult.handled;
-              }
+                  // Special Android hardware & navigation keys
+                  final keyMap = <LogicalKeyboardKey, String>{
+                    LogicalKeyboardKey.backspace: 'Backspace',
+                    LogicalKeyboardKey.enter: 'Enter',
+                    LogicalKeyboardKey.numpadEnter: 'Enter',
+                    LogicalKeyboardKey.tab: 'Tab',
+                    LogicalKeyboardKey.escape: 'Back', // Escape operates as Android Back
+                    LogicalKeyboardKey.delete: 'Delete',
+                    LogicalKeyboardKey.arrowUp: 'ArrowUp',
+                    LogicalKeyboardKey.arrowDown: 'ArrowDown',
+                    LogicalKeyboardKey.arrowLeft: 'ArrowLeft',
+                    LogicalKeyboardKey.arrowRight: 'ArrowRight',
+                  };
 
-              // Direct printable typing into active Android app / text input
-              final character = event.character;
-              if (character != null &&
-                  character.isNotEmpty &&
-                  !HardwareKeyboard.instance.isControlPressed &&
-                  !HardwareKeyboard.instance.isAltPressed &&
-                  !HardwareKeyboard.instance.isMetaPressed) {
-                context.read<InputBloc>().add(SendTextEvent(character));
-                return KeyEventResult.handled;
-              }
+                  if (keyMap.containsKey(event.logicalKey)) {
+                    context.read<InputBloc>().add(SendKeyEvent(keyMap[event.logicalKey]!));
+                    return KeyEventResult.handled;
+                  }
 
-              return KeyEventResult.ignored;
-            },
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.black,
-                borderRadius: BorderRadius.circular(28),
-                border: Border.all(color: AppTheme.surfaceLight, width: 4),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.7),
-                    blurRadius: 30,
-                    offset: const Offset(0, 15),
+                  // Direct printable typing into active Android app / text input
+                  final character = event.character;
+                  if (character != null &&
+                      character.isNotEmpty &&
+                      !HardwareKeyboard.instance.isControlPressed &&
+                      !HardwareKeyboard.instance.isAltPressed &&
+                      !HardwareKeyboard.instance.isMetaPressed) {
+                    context.read<InputBloc>().add(SendTextEvent(character));
+                    return KeyEventResult.handled;
+                  }
+
+                  return KeyEventResult.ignored;
+                },
+                child: Container(
+                  // Outer Phone Chassis (Matte Gunmetal Titanium with chamfered edge)
+                  padding: const EdgeInsets.all(5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF141924),
+                    borderRadius: BorderRadius.circular(44),
+                    border: Border.all(color: const Color(0xFF2E384D), width: 2.5),
+                    boxShadow: [
+                      // Deep ground shadow
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.85),
+                        blurRadius: 36,
+                        offset: const Offset(0, 16),
+                      ),
+                      // Ambient Screen Backlight Glow (Casts subtle neon bloom on studio backdrop)
+                      BoxShadow(
+                        color: AppTheme.primary.withValues(alpha: 0.16),
+                        blurRadius: 50,
+                        spreadRadius: 2,
+                      ),
+                      BoxShadow(
+                        color: AppTheme.accentCyan.withValues(alpha: 0.08),
+                        blurRadius: 80,
+                        spreadRadius: -4,
+                      ),
+                    ],
                   ),
-                ],
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: Stack(
-                children: [
-                  // Live Screen HTML5 Canvas
-                  const HtmlElementView(viewType: viewType),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(38),
+                    child: Container(
+                      color: Colors.black,
+                      child: Stack(
+                        children: [
+                          // Live Screen HTML5 Canvas
+                          const HtmlElementView(viewType: viewType),
 
-                  // Transparent, fully interactive pointer listener directly over the mirrored screen
-                  Positioned.fill(
-                    child: Listener(
-                      key: _screenKey,
-                      behavior: HitTestBehavior.opaque,
-                      onPointerDown: (PointerDownEvent event) {
-                        _focusNode.requestFocus();
-                        if (event.buttons & 1 != 0) { // Primary / Left Click / Touch
-                          _isPointerDown = true;
-                          _dispatchTouchEvent('down', event.localPosition);
-                        } else if (event.buttons & 2 != 0) { // Right Click -> Android Back
-                          context.read<InputBloc>().add(const SendKeyEvent('Back'));
-                        }
-                      },
-                      onPointerMove: (PointerMoveEvent event) {
-                        if (_isPointerDown) {
-                          _dispatchTouchEvent('move', event.localPosition);
-                        }
-                      },
-                      onPointerUp: (PointerUpEvent event) {
-                        if (_isPointerDown) {
-                          _isPointerDown = false;
-                          _dispatchTouchEvent('up', event.localPosition);
-                        }
-                      },
-                      onPointerCancel: (PointerCancelEvent event) {
-                        if (_isPointerDown) {
-                          _isPointerDown = false;
-                          _dispatchTouchEvent('up', event.localPosition);
-                        }
-                      },
-                      onPointerSignal: (PointerSignalEvent event) {
-                        if (event is PointerScrollEvent) {
-                          _dispatchScrollEvent(
-                            event.localPosition,
-                            event.scrollDelta.dx,
-                            event.scrollDelta.dy,
-                          );
-                        }
-                      },
-                      child: const SizedBox.expand(),
-                    ),
-                  ),
+                          // Transparent, fully interactive pointer listener directly over mirrored screen
+                          Positioned.fill(
+                            child: Listener(
+                              key: _screenKey,
+                              behavior: HitTestBehavior.opaque,
+                              onPointerDown: (PointerDownEvent event) {
+                                _focusNode.requestFocus();
+                                if (event.buttons & 1 != 0) { // Primary / Left Click / Touch
+                                  _isPointerDown = true;
+                                  _dispatchTouchEvent('down', event.localPosition);
+                                } else if (event.buttons & 2 != 0) { // Right Click -> Android Back
+                                  context.read<InputBloc>().add(const SendKeyEvent('Back'));
+                                }
+                              },
+                              onPointerMove: (PointerMoveEvent event) {
+                                if (_isPointerDown) {
+                                  _dispatchTouchEvent('move', event.localPosition);
+                                }
+                              },
+                              onPointerUp: (PointerUpEvent event) {
+                                if (_isPointerDown) {
+                                  _isPointerDown = false;
+                                  _dispatchTouchEvent('up', event.localPosition);
+                                }
+                              },
+                              onPointerCancel: (PointerCancelEvent event) {
+                                if (_isPointerDown) {
+                                  _isPointerDown = false;
+                                  _dispatchTouchEvent('up', event.localPosition);
+                                }
+                              },
+                              onPointerSignal: (PointerSignalEvent event) {
+                                if (event is PointerScrollEvent) {
+                                  _dispatchScrollEvent(
+                                    event.localPosition,
+                                    event.scrollDelta.dx,
+                                    event.scrollDelta.dy,
+                                  );
+                                }
+                              },
+                              child: const SizedBox.expand(),
+                            ),
+                          ),
 
-                  // Initial loading overlay until first video frame is received
-                  if (!_isFirstFrameReceived)
-                    Container(
-                      color: AppTheme.background.withValues(alpha: 0.9),
-                      child: const Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            CircularProgressIndicator(color: AppTheme.primaryLight),
-                            SizedBox(height: 16),
-                            Text('Receiving Live Stream...', style: TextStyle(color: Colors.white70)),
-                          ],
-                        ),
+                          // Top Speaker Earpiece Slit (Hardware Mockup Detail)
+                          Positioned(
+                            top: 4,
+                            left: 0,
+                            right: 0,
+                            child: IgnorePointer(
+                              child: Center(
+                                child: Container(
+                                  width: 48,
+                                  height: 3,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF1E2838),
+                                    borderRadius: BorderRadius.circular(2),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          // Centered Punch-Hole Selfie Camera (Hardware Mockup Detail)
+                          Positioned(
+                            top: 10,
+                            left: 0,
+                            right: 0,
+                            child: IgnorePointer(
+                              child: Center(
+                                child: Container(
+                                  width: 11,
+                                  height: 11,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF07090E),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: const Color(0xFF1F293D), width: 1.5),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: AppTheme.primary.withValues(alpha: 0.3),
+                                        blurRadius: 3,
+                                      ),
+                                    ],
+                                  ),
+                                  child: Center(
+                                    child: Container(
+                                      width: 4,
+                                      height: 4,
+                                      decoration: const BoxDecoration(
+                                        color: Color(0xFF1E2A44),
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          // Minimalist Bottom Gesture Navigation Bar
+                          Positioned(
+                            bottom: 6,
+                            left: 0,
+                            right: 0,
+                            child: IgnorePointer(
+                              child: Center(
+                                child: Container(
+                                  width: 72,
+                                  height: 3.5,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.3),
+                                    borderRadius: BorderRadius.circular(2),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          // Initial loading overlay until first video frame is received
+                          if (!_isFirstFrameReceived)
+                            Container(
+                              color: AppTheme.background.withValues(alpha: 0.95),
+                              child: const Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    CircularProgressIndicator(color: AppTheme.primaryLight),
+                                    SizedBox(height: 16),
+                                    Text('Receiving Live Stream...', style: TextStyle(color: Colors.white70)),
+                                  ],
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
-                ],
+                  ),
+                ),
               ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

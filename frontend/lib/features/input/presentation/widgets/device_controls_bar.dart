@@ -16,17 +16,21 @@ class DeviceControlsBar extends StatelessWidget {
         final bool isKiosk = inputState.isKioskMode;
 
         return Container(
-          width: 155,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+          width: 170,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
           decoration: BoxDecoration(
-            color: AppTheme.surface.withValues(alpha: 0.95),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+            color: AppTheme.surface.withValues(alpha: 0.88),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.4),
-                blurRadius: 20,
-                offset: const Offset(0, 6),
+                color: Colors.black.withValues(alpha: 0.45),
+                blurRadius: 24,
+                offset: const Offset(0, 10),
+              ),
+              BoxShadow(
+                color: AppTheme.primary.withValues(alpha: 0.04),
+                blurRadius: 30,
               ),
             ],
           ),
@@ -34,14 +38,33 @@ class DeviceControlsBar extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // Dock Header
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.tune_rounded, size: 14, color: AppTheme.accentCyan.withValues(alpha: 0.8)),
+                  const SizedBox(width: 6),
+                  const Text(
+                    'STUDIO DOCK',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.textSecondary,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+
               // Section 1: Kiosk Restricted Access (Bonus 4)
               _buildFeatureButton(
                 context,
-                icon: isKiosk ? Icons.lock_rounded : Icons.lock_open_rounded,
-                label: isKiosk ? 'Kiosk: Locked' : 'Kiosk Mode',
-                subtitle: isKiosk ? 'Calculator App' : 'Off',
+                icon: isKiosk ? Icons.shield_rounded : Icons.shield_outlined,
+                label: isKiosk ? 'Kiosk Active' : 'Kiosk Mode',
+                subtitle: isKiosk ? 'Locked to Calc' : 'Disabled',
                 isActive: isKiosk,
-                activeColor: Colors.amber.shade700,
+                activeColor: Colors.amber.shade600,
                 onTap: () {
                   final newEnabled = !isKiosk;
                   context.read<InputBloc>().add(SendKioskToggleEvent(
@@ -51,7 +74,7 @@ class DeviceControlsBar extends StatelessWidget {
                     SnackBar(
                       content: Text(
                         newEnabled
-                          ? 'Kiosk Mode ENABLED: Restricted to Device Calculator'
+                          ? 'Kiosk Mode ENABLED: Device restricted to Calculator'
                           : 'Kiosk Mode DISABLED: Full device access restored',
                       ),
                       duration: const Duration(seconds: 2),
@@ -66,8 +89,9 @@ class DeviceControlsBar extends StatelessWidget {
               _buildFeatureButton(
                 context,
                 icon: Icons.content_paste_rounded,
-                label: 'Paste to Device',
-                subtitle: 'Two-Way Sync',
+                label: 'Paste to Phone',
+                subtitle: 'PC ➔ Device',
+                accentColor: AppTheme.accentCyan,
                 onTap: () async {
                   try {
                     final textJS = await web.window.navigator.clipboard.readText().toDart;
@@ -98,6 +122,7 @@ class DeviceControlsBar extends StatelessWidget {
                 icon: Icons.video_library_rounded,
                 label: 'Recordings',
                 subtitle: 'Auto-Saved MP4',
+                accentColor: AppTheme.primaryLight,
                 onTap: () {
                   showDialog(
                     context: context,
@@ -107,15 +132,15 @@ class DeviceControlsBar extends StatelessWidget {
               ),
 
               const Padding(
-                padding: EdgeInsets.symmetric(vertical: 10),
-                child: Divider(height: 1, color: Colors.white12),
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Divider(height: 1, color: Colors.white10),
               ),
 
-              // Section 4: Secondary Convenience Hardware Controls
+              // Section 4: Android 3-Button Navigation
               const Center(
                 child: Text(
-                  'CONVENIENCE KEYS',
-                  style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.white38, letterSpacing: 1),
+                  'NAVIGATION',
+                  style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.white30, letterSpacing: 1),
                 ),
               ),
               const SizedBox(height: 8),
@@ -146,10 +171,23 @@ class DeviceControlsBar extends StatelessWidget {
                 label: 'Recents',
                 isDisabled: isKiosk,
                 onTap: isKiosk
-                    ? () => _showBlockedAlert(context, 'Recent apps is disabled in Kiosk mode')
+                    ? () => _showBlockedAlert(context, 'Recent apps view is disabled in Kiosk mode')
                     : () => context.read<InputBloc>().add(const SendKeyEvent('Recents')),
               ),
-              const SizedBox(height: 6),
+
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Divider(height: 1, color: Colors.white10),
+              ),
+
+              // Section 5: Hardware Keys (Volume & Power)
+              const Center(
+                child: Text(
+                  'HARDWARE KEYS',
+                  style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.white30, letterSpacing: 1),
+                ),
+              ),
+              const SizedBox(height: 8),
 
               Row(
                 children: [
@@ -171,6 +209,13 @@ class DeviceControlsBar extends StatelessWidget {
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 6),
+              _buildMiniButton(
+                context,
+                icon: Icons.power_settings_new_rounded,
+                label: 'Power / Sleep',
+                onTap: () => context.read<InputBloc>().add(const SendKeyEvent('Power')),
               ),
             ],
           ),
@@ -202,29 +247,38 @@ class DeviceControlsBar extends StatelessWidget {
       context: context,
       builder: (dialogCtx) => AlertDialog(
         backgroundColor: AppTheme.surface,
-        title: const Text('Paste Text to Device', style: TextStyle(color: Colors.white, fontSize: 16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Paste Text to Device', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
         content: TextField(
           controller: controller,
           autofocus: true,
           style: const TextStyle(color: Colors.white),
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             hintText: 'Type or paste text here...',
-            hintStyle: TextStyle(color: Colors.white38),
+            hintStyle: const TextStyle(color: Colors.white38),
+            filled: true,
+            fillColor: AppTheme.surfaceLight,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogCtx).pop(),
-            child: const Text('Cancel'),
+            child: const Text('Cancel', style: TextStyle(color: AppTheme.textSecondary)),
           ),
           ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primary,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
             onPressed: () {
               if (controller.text.isNotEmpty) {
                 context.read<InputBloc>().add(SendClipboardEvent(controller.text));
               }
               Navigator.of(dialogCtx).pop();
             },
-            child: const Text('Send'),
+            child: const Text('Send to Device'),
           ),
         ],
       ),
@@ -239,24 +293,41 @@ class DeviceControlsBar extends StatelessWidget {
     required VoidCallback onTap,
     bool isActive = false,
     Color? activeColor,
+    Color? accentColor,
   }) {
-    final color = isActive ? (activeColor ?? AppTheme.primary) : AppTheme.surfaceLight.withValues(alpha: 0.5);
+    final color = isActive
+        ? (activeColor ?? AppTheme.primary).withValues(alpha: 0.2)
+        : AppTheme.surfaceLight.withValues(alpha: 0.5);
+
+    final borderColor = isActive
+        ? (activeColor ?? AppTheme.primary).withValues(alpha: 0.6)
+        : Colors.white.withValues(alpha: 0.06);
 
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(12),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
         decoration: BoxDecoration(
           color: color,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: isActive ? Colors.amber.withValues(alpha: 0.5) : Colors.white.withValues(alpha: 0.08),
-          ),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: borderColor),
         ),
         child: Row(
           children: [
-            Icon(icon, size: 18, color: isActive ? Colors.white : AppTheme.primaryLight),
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: (isActive ? (activeColor ?? AppTheme.primary) : (accentColor ?? AppTheme.primary))
+                    .withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(
+                icon,
+                size: 16,
+                color: isActive ? (activeColor ?? Colors.amber) : (accentColor ?? AppTheme.primaryLight),
+              ),
+            ),
             const SizedBox(width: 8),
             Expanded(
               child: Column(
@@ -274,8 +345,9 @@ class DeviceControlsBar extends StatelessWidget {
                   Text(
                     subtitle,
                     style: TextStyle(
-                      color: isActive ? Colors.white70 : AppTheme.textSecondary,
+                      color: isActive ? (activeColor ?? Colors.amber) : AppTheme.textSecondary,
                       fontSize: 10,
+                      fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
                     ),
                   ),
                 ],
@@ -297,23 +369,32 @@ class DeviceControlsBar extends StatelessWidget {
   }) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(10),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
         decoration: BoxDecoration(
           color: isDisabled
-              ? Colors.white.withValues(alpha: 0.03)
+              ? Colors.white.withValues(alpha: 0.02)
               : isPrimary
-                  ? AppTheme.primary
-                  : AppTheme.surfaceLight.withValues(alpha: 0.3),
-          borderRadius: BorderRadius.circular(8),
+                  ? AppTheme.primary.withValues(alpha: 0.9)
+                  : AppTheme.surfaceLight.withValues(alpha: 0.4),
+          borderRadius: BorderRadius.circular(10),
           border: Border.all(
             color: isDisabled
-                ? Colors.white.withValues(alpha: 0.04)
+                ? Colors.white.withValues(alpha: 0.03)
                 : isPrimary
-                    ? AppTheme.primaryLight
+                    ? AppTheme.primaryLight.withValues(alpha: 0.5)
                     : Colors.white.withValues(alpha: 0.06),
           ),
+          boxShadow: isPrimary
+              ? [
+                  BoxShadow(
+                    color: AppTheme.primary.withValues(alpha: 0.3),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
+                  ),
+                ]
+              : null,
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -321,15 +402,15 @@ class DeviceControlsBar extends StatelessWidget {
             Icon(
               icon,
               size: 14,
-              color: isDisabled ? Colors.white30 : Colors.white,
+              color: isDisabled ? Colors.white24 : Colors.white,
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: 8),
             Text(
               label,
               style: TextStyle(
-                color: isDisabled ? Colors.white30 : Colors.white,
+                color: isDisabled ? Colors.white24 : Colors.white,
                 fontSize: 12,
-                fontWeight: FontWeight.w500,
+                fontWeight: isPrimary ? FontWeight.bold : FontWeight.w500,
               ),
             ),
           ],
@@ -346,22 +427,22 @@ class DeviceControlsBar extends StatelessWidget {
   }) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(10),
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 7),
+        padding: const EdgeInsets.symmetric(vertical: 8),
         decoration: BoxDecoration(
-          color: AppTheme.surfaceLight.withValues(alpha: 0.3),
-          borderRadius: BorderRadius.circular(8),
+          color: AppTheme.surfaceLight.withValues(alpha: 0.35),
+          borderRadius: BorderRadius.circular(10),
           border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, size: 13, color: Colors.white),
+            Icon(icon, size: 13, color: AppTheme.textPrimary),
             const SizedBox(width: 4),
             Text(
               label,
-              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w500),
+              style: const TextStyle(color: AppTheme.textPrimary, fontSize: 11, fontWeight: FontWeight.w600),
             ),
           ],
         ),
@@ -369,3 +450,4 @@ class DeviceControlsBar extends StatelessWidget {
     );
   }
 }
+
