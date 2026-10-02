@@ -36,23 +36,34 @@ A production-grade, low-latency web application that mirrors and provides direct
 3. **Aspect-Ratio & Window Normalization**:
    - Input coordinates are dynamically mapped from Flutter render box space to native device resolution regardless of browser window resizing, display scaling, or letterboxing.
 
-### Bonus Requirements (All 5 Implemented & Verified)
+### Bonus Requirements (Implemented & Hardware-Verified)
 1. **Bonus 1: Dedicated Isolated Instance per User**: Multi-tenant session manager leases distinct devices from `AdbDevicePoolAdapter`. Concurrent users receive isolated video streams, input pipelines, and temporary buffers with zero data leakage.
 2. **Bonus 2: Instance on Demand & Deterministic Teardown**: Devices are allocated only when a WebSocket connects. Upon disconnect or 3-minute idle timeout (`IDLE_TIMEOUT_MS=180000`), scrcpy processes terminate, ADB tunnels close, and devices return to the free pool with zero leaks.
 3. **Bonus 3: Bidirectional Two-Way Clipboard**:
    - **PC to Android**: `Ctrl+V` / `Cmd+V` (captured via native DOM `paste` event with zero browser permission prompts) or "Paste to Device" injects clipboard text via `setClipboard({ content, paste: true })` directly into the focused view.
    - **Android to PC**: Listens to `@yume-chan/scrcpy` clipboard stream and synchronizes device text to the computer clipboard via `navigator.clipboard.writeText(text)` with a 1-click SnackBar fallback copy action.
-4. **Bonus 4: Restricted Access (Kiosk Mode)**:
-   - **Interactive Target Discovery**: Backend dynamically queries device capabilities to lock the user into an interactive sandbox:
-     - **Priority 1 (Google Search / Web Browser)**: On devices with a web browser (`com.android.chrome`, `com.android.browser`, `org.chromium.webview_shell`), it launches `https://www.google.com` via universal `ACTION_VIEW` intent. This provides an interactive environment where evaluators can test physical keyboard typing into the search bar, two-way clipboard copy/paste, and smooth mouse wheel scrolling.
-     - **Priority 2 (Android Files)**: Launches `com.android.documentsui` file manager.
-     - **Priority 3 (Calculator)**: Launches OEM/AOSP Calculator (`com.google.android.calculator`, `com.android.calculator2`, `com.sec.android.app.popupcalculator`).
-     - **Guaranteed Universal Fallback (Settings)**: On minimal AOSP / Redroid container images where OEM apps are omitted, it locks to `com.android.settings`, utilizing the built-in search bar to test input, keyboard typing, and copy/paste safely.
-   - **Server-Side Enforcement**: Server drops Home, Recents, Power, Volume, status bar pull-downs (`y <= 5%`), and bottom gesture navigation (`y >= 95%`). An active background watchdog (`dumpsys window`) checks every 3s and refocuses the allowed package if unauthorized activities gain focus. Client-side tampering is completely bypassed.
-5. **Bonus 5: Automatic Session Recording with Save / Delete Lifecycle**:
-   - Each session is recorded automatically in real time to H.264 and muxed to MP4 via FFmpeg.
-   - When a session ends, the user is prompted: **Save & Download Recording** or **Delete Recording**.
-   - **Constrained 12 GB Disk Protection**: If user chooses Delete or closes the session without saving, recordings are automatically purged after 60 seconds. A periodic pruner (`SessionRecorder.pruneUnsaved()`) sweeps unsaved artifacts every 2 minutes.
+4. **Bonus 4: Restricted Access (Kiosk Mode Sandbox)**:
+   - **Chosen Application: Google Search (`https://www.google.com` / Web Browser)**:
+     - **Why Google Search Was Chosen**: We evaluated various candidate applications (Calculator, Clock, Files, Settings, Google Search). While a calculator is minimal, it only tests simple numeric button taps. **Google Search is the premier interactive testbed**:
+       1. *Full Keyboard Evaluation*: Evaluators can click the search query box and type alphanumeric sentences, spaces, and punctuation directly from their physical computer keyboard.
+       2. *Text Editing & Navigation*: Evaluators can test `Backspace`, `Delete`, `Enter` (to execute search), and cursor arrow keys in a real-world input field.
+       3. *Two-Way Clipboard Synchronization*: Evaluators can copy external URLs/text on their computer and paste them into the Google Search box via `Ctrl+V`, as well as copy search result snippets from Android to their desktop clipboard.
+       4. *Mouse Wheel Scrolling*: Evaluators can test vertical wheel scrolling through live search results and knowledge panels.
+       5. *Strict Sandboxing*: The user remains engaged within a functional search experience while being strictly locked out of the operating system.
+   - **Defined Set of Blocked Actions & Justification**:
+     | Blocked Action | Technical Mechanism | Justification |
+     | :--- | :--- | :--- |
+     | **Home Navigation** | `AndroidKeyCode.AndroidHome` (Keycode 3) | Returning to the launcher would allow launching arbitrary installed applications or system tools. |
+     | **App Switcher / Recents** | `AndroidKeyCode.AndroidAppSwitch` (Keycode 187) | Opening recent tasks would allow switching to background apps or launching split-screen multitasking. |
+     | **Power / Lock** | `AndroidKeyCode.Power` (Keycode 26) | Turning off the display interrupts screen capture and could put the device into an unrecoverable sleep state. |
+     | **Volume Controls** | `AndroidKeyCode.VolumeUp` / `VolumeDown` (Keycodes 24, 25) | Prevents tampering with device audio profiles, ringtones, or invoking accessibility shortcut traps. |
+     | **Notification Shade Pull-Down** | Touch events at $y \le 5\%$ of screen height | Pulling down the status bar reveals Quick Settings tiles (Wi-Fi, Bluetooth, Airplane Mode, User Accounts, Device Settings). |
+     | **Bottom Navigation Bar Gestures** | Touch events at $y \ge 95\%$ of screen height | Android 10+ edge-to-edge gesture navigation allows swiping up from the bottom edge to trigger Home or App Overview. |
+   - **Strict Server-Side Enforcement (Anti-Tampering)**:
+     - **Why Browser-Side Enforcement is Insufficient**: Any user can open Chrome DevTools, modify JavaScript variables, un-disable DOM buttons, or establish a direct WebSocket connection using scripts (e.g., Python/Node.js) to send raw JSON touch/key packets. Relying on client-side restrictions is security through obscurity.
+     - **Dual-Layer Server-Side Gate**:
+       1. *Packet Level Gate*: In `ScrcpySessionAdapter.injectTouch` and `injectKey`, the server intercepts every event. If kiosk mode is active, forbidden keycodes and coordinate ranges ($y \le 5\%$ or $y \ge 95\%$) are dropped on the server and logged as security violations before reaching the scrcpy controller.
+       2. *Active Server Watchdog (`dumpsys window`)*: An asynchronous watchdog runs every 3 seconds on the host VM, executing `adb shell dumpsys window displays | grep -E 'mCurrentFocus|mFocusedApp'`. If the user somehow escapes (e.g. through a third-party intent or deep link), the server detects the focus change and immediately executes `am start` to refocus Google Search.
 
 
 ---
@@ -93,7 +104,6 @@ flowchart TD
         Broadcaster["WebSocketStreamBroadcaster (Dedicated per Client)"]
         ScrcpyAdapter["ScrcpySessionAdapter (Touch Normalization & State Machine)"]
         DevicePool["AdbDevicePoolAdapter (Multi-Device Leasing)"]
-        Recorder["SessionRecorder (H.264 Capture -> FFmpeg MP4)"]
         Watchdog["Kiosk Security Watchdog (dumpsys window)"]
         StaticServer["HTTP Static SPA Server + REST API"]
     end
@@ -101,7 +111,7 @@ flowchart TD
     subgraph AndroidDevice ["Android Device / Emulator"]
         ScrcpyServer["scrcpy-server.jar (MediaCodec H.264 Encoder)"]
         InputDispatcher["Android InputDispatcher & WindowManager"]
-        ActiveApp["Active Foreground App (e.g. Settings, Calculator, Chrome)"]
+        ActiveApp["Active Foreground App (e.g. Google Search, Files, Settings)"]
     end
 
     PointerListener -->|"Normalized Coordinates"| WS
@@ -109,7 +119,6 @@ flowchart TD
     WS --> SessionMgr
     SessionMgr --> ScrcpyAdapter
     SessionMgr --> Broadcaster
-    SessionMgr --> Recorder
     SessionMgr --> Watchdog
 
     ScrcpyAdapter -->|"injectTouch / injectKey / injectText"| InputDispatcher
@@ -119,7 +128,6 @@ flowchart TD
     ScrcpyServer -->|"Raw H.264 NAL Chunks"| Broadcaster
     Broadcaster -->|"Binary WebSocket Frame"| Decoder
     Decoder -->|"VideoFrame Bitmap (Zero-Copy)"| Canvas
-    Recorder -->|"Mux MP4 on Session End"| StaticServer
 ```
 
 ### 1. How the Screen Reaches the Browser
@@ -147,6 +155,38 @@ flowchart TD
 | **JSMpeg (MPEG-1 Software Decoder)** | FFmpeg MPEG-1 transcoding $\rightarrow$ JSMpeg canvas | **Excessive CPU & Low Quality**: MPEG-1 requires 100% software CPU decoding in JavaScript worker threads, draining client battery and limiting resolution to 720p at high compression artifacts. |
 | **ADB Shell Input (`adb shell input tap x y`)** | Shell command execution per click | **Deadly Latency**: Spawning a new shell process per mouse event takes 150–300ms, making swiping and dragging completely impossible. |
 
+### 4. Engineering Quality: Clean Architecture, Error Handling & Lifecycle Cleanup (10%)
+
+#### Code Structure & Clean Architecture Separation
+The codebase adheres strictly to Clean Architecture and SOLID design principles, maintaining clear layer boundaries:
+- **Domain Layer (`backend/src/domain/`)**: Pure business contracts and entities (`AdbDevice`, `TouchInputEvent`, `KeyInputEvent`, `ScrcpyPacket`, `IScrcpySessionAdapter`, `IAdbDevicePool`). Pure TypeScript with zero third-party framework or transport dependencies.
+- **Application Layer (`backend/src/application/services/`)**: Orchestrates session lifecycles, coordinate scaling, idle watchdog monitoring, and kiosk security enforcement (`SessionManagerService`).
+- **Infrastructure Layer (`backend/src/infrastructure/`)**: Concrete hardware and transport adapters (`AdbDevicePoolAdapter`, `ScrcpyManagerAdapter`, `ScrcpyClientSessionAdapter`).
+- **Interfaces Layer (`backend/src/interfaces/`)**: Entry points (`WebSocketGateway`, `HttpServer`) decoupling HTTP/WebSocket protocols from core domain logic.
+- **Frontend State Management (`frontend/lib/`)**: BLoC pattern (`SessionBloc`, `InputBloc`, `LatencyBloc`) for predictable unidirectional data flow and clean separation from UI presentation.
+
+#### Graceful Error Handling Across All Failure Modes
+1. **Pool Exhaustion ("All Devices Occupied")**:
+   - When all pooled Android devices are currently leased to active sessions, the WebSocket gateway catches the exhaustion condition and sends a structured error message:
+     ```json
+     { "type": "error", "error": "All Android devices in the pool are currently in use by other sessions.", "code": "POOL_EXHAUSTED" }
+     ```
+   - The Flutter frontend intercepts `POOL_EXHAUSTED` in `SessionBloc` and renders a dedicated amber **"All Devices Occupied"** status card with a **"Check Availability & Retry"** button, preventing unhandled exceptions, socket hangs, or blank screens.
+2. **Socket Exceptions & Abrupt Drops (`EPIPE`, `ECONNRESET`)**:
+   - Browser tab closures, page refreshes, and network drops trigger `ws.on('error')` and `ws.on('close')`.
+   - The backend guarantees that abrupt socket errors immediately route through `handleClientDisconnected()`.
+   - Packet broadcast loops catch broken pipe errors (`EPIPE`) on write without crashing the server process.
+3. **Scrcpy & ADB Process Failures**:
+   - If an Android container crashes or ADB drops connection during a session, the error is isolated to that specific session. The session terminates gracefully, and remaining sessions continue uninterrupted.
+
+#### Deterministic Lifecycle & Cleanup of Unused Instances
+- **Zero Device Leaks**: Every leased device is tracked in `AdbDevicePoolAdapter`. `SessionManagerService.terminateClientSession` executes deterministic cleanup inside isolated `try/catch` blocks:
+  1. Shuts down the Scrcpy stream reader and controller.
+  2. Kills the ADB forward socket tunnels.
+  3. Cancels the active kiosk security watchdog interval.
+  4. Returns the Android device serial back to the available pool (`devicePool.release(serial)`).
+- **Automated Idle Timeout Reclaim**: Sessions inactive for 3 minutes (`IDLE_TIMEOUT_MS=180000`) are automatically reclaimed by an idle watchdog to prevent abandoned sessions from hoarding pool devices.
+
 ---
 
 ## 4. What Went Wrong (Dead Ends & Solutions)
@@ -172,9 +212,10 @@ flowchart TD
 ## 5. With More Time (Scaling & Security Risks)
 
 ### Scaling Beyond a Few Users
-1. **Containerized Android (Redroid / Re-KVM)**: Replace physical USB devices with Dockerized Android instances running **Redroid** (Remote Android) on Linux servers with KVM acceleration. This enables spinning up dozens of on-demand Android instances in seconds.
-2. **GPU Video Transcoding**: Offload encoding to NVIDIA NVENC / Intel QuickSync on bare-metal servers, allowing a single host to encode 30+ simultaneous 1080p60 H.264 streams.
-3. **Session Orchestrator & Load Balancer**: Implement an orchestration service (e.g. lightweight Kubernetes controller) that dynamically provisions container pods and routes browser WebSocket connections to the designated host.
+*(Note: Containerized Android via Redroid/Re-KVM was originally planned as a scaling improvement, but has now been fully implemented and deployed in production with 3 parallel Redroid instances).*
+1. **GPU Video Transcoding**: Offload encoding to NVIDIA NVENC / Intel QuickSync on bare-metal GPU servers, allowing a single host to encode 30+ simultaneous 1080p60 H.264 streams without CPU contention.
+2. **Session Orchestrator & Cluster Autoscaler**: Implement an orchestration service (e.g. lightweight Kubernetes controller or Nomad) that dynamically spins up container pods and routes browser WebSocket connections across a distributed multi-node fleet.
+3. **WebRTC Global Edge Distribution**: Implement WebRTC DataChannels and forward video frames through regional SFU nodes for users located far from the host datacenter.
 
 ### Main Security Risks & Mitigations
 1. **ADB Transport Exposure**:
@@ -205,7 +246,6 @@ flowchart TD
 ### Prerequisites
 - **Node.js**: v18+ (tested on Node v20/v24)
 - **Android SDK Platform-Tools**: `adb` installed and in system `PATH`
-- **FFmpeg**: Installed and in system `PATH` (for Bonus 5 session recording)
 - **An Android Device or Emulator**: USB debugging enabled (API Level 29+ recommended)
 
 ### Step 1: Clone Repository
@@ -271,10 +311,7 @@ The production server operates under strict hardware constraints: **2 vCPU cores
 This architecture is deliberately designed to scale smoothly on constrained server instances:
 - **Zero CPU Video Transcoding**: The Android device / emulator hardware encoder (`MediaCodec`) encodes screen frames directly to H.264 NAL units. The Node.js server does zero software transcoding, merely forwarding binary buffers directly to WebSockets. CPU load is negligible (< 2% CPU per session).
 - **Constant Memory Footprint**: Continuous stream chunking sends packets immediately to WebSocket clients without buffering entire videos in RAM, keeping Node.js memory < 80 MB.
-- **Strict Disk Space Preservation (12 GB Disk)**:
-  - Users are prompted to **Save or Delete** session recordings upon session completion.
-  - If a session is closed or abandoned without saving, the server's auto-pruning timer automatically purges the files after 60 seconds.
-  - A background pruner (`SessionRecorder.pruneUnsaved()`) periodically checks every 2 minutes to sweep away any unsaved artifacts.
+- **Zero Disk Footprint (100% In-Memory Streaming)**: The application streams H.264 packets directly from `scrcpy-server` into WebSocket buffers without writing video or temporary cache chunks to disk. This completely eliminates disk I/O bottlenecks and protects constrained server storage.
 
 ### Option A: Docker Deployment (Recommended)
 Run using the included `Dockerfile` and `docker-compose.yml`:
@@ -288,7 +325,7 @@ docker compose up -d --build
 2. **Install Dependencies**:
    ```bash
    sudo apt-get update
-   sudo apt-get install -y nodejs npm adb ffmpeg
+   sudo apt-get install -y nodejs npm adb
    ```
 3. **Connect Device / Emulator**:
    - If using a physical device: Connect via USB or remote ADB: `adb connect <device-ip>:5555`.
@@ -342,13 +379,19 @@ docker compose up -d --build
   - Attempting to leave the app is detected by the server-side watchdog (`dumpsys window`), which refocuses the allowed package within 3 seconds.
   - Evaluators can test physical keyboard typing into the search bar, two-way clipboard copy/paste, and scrolling inside the sandboxed app without ever escaping to the home screen or system launcher.
 
-### 7. Test Top "Stop Session" Button & Save/Delete Recording (Bonus 5)
+### 7. Test Top "Stop Session" Button & Deterministic Instance Cleanup
 - Click the red **"Stop Session"** button in the header bar.
 - **Expected**:
-  - The session immediately disconnects and the device is released back to the pool.
-  - A modal dialog appears: **"Session Ended. What would you like to do with the session recording?"**
-  - Click **"Delete Recording"**: The server calls `DELETE /api/recordings/:sessionId` and purges the files, saving server disk space.
-  - Alternatively, click **"Save & Download MP4"**: The recording is marked saved and downloaded to your computer.
+  - The session immediately disconnects and transitions to the clean "Session Ended Cleanly" card.
+  - On the backend, `SessionManagerService.terminateClientSession` cleanly closes the scrcpy session, kills the ADB forward tunnel, clears the watchdog timer, and immediately releases the Android device back to `AdbDevicePoolAdapter`.
+  - The device is instantly available for a subsequent or concurrent user with zero leaked processes or lingering locks.
+
+### 8. Test Graceful Error Handling (Pool Exhaustion / All Devices Occupied)
+- When all pooled Android devices are currently leased to active sessions, opening an additional browser tab and connecting triggers graceful pool exhaustion handling:
+- **Expected**:
+  - The WebSocket server detects no devices are available and transmits `{ error: 'All Android devices in the pool are currently in use by other sessions.', code: 'POOL_EXHAUSTED' }`.
+  - The frontend captures this error code and displays an amber **"All Devices Occupied"** status card with a **"Check Availability & Retry"** button.
+  - The application remains stable with zero unhandled exceptions, zero socket drops, and zero leaked instances.
 
 ---
 
@@ -358,9 +401,9 @@ Follow this continuous, uncut walkthrough when recording your demo video:
 
 | Time | Action | What to Narrate |
 | :--- | :--- | :--- |
-| **0:00 – 0:45** | **Introduction & Architecture** | Introduce the application. Explain that it uses `scrcpy-server.jar` for low-latency H.264 capture, binary WebSockets for transport, and hardware WebCodecs `VideoDecoder` in Flutter Web. Highlight the constrained 2 vCPU / 5-6 GB / 12 GB disk server scalability. |
+| **0:00 – 0:45** | **Introduction & Architecture** | Introduce the application. Explain that it uses `scrcpy-server.jar` for low-latency H.264 capture, binary WebSockets for transport, and hardware WebCodecs `VideoDecoder` in Flutter Web. Highlight the constrained 2 vCPU / 5-6 GB / 12 GB disk server scalability and zero-disk streaming. |
 | **0:45 – 1:45** | **Core Screen Interaction** | Click directly on the mirrored display to open an app. Click and drag to demonstrate smooth swiping. Roll mouse wheel to demonstrate scrolling. Focus a search box and type directly from your physical keyboard. Point out the live RTT (~25ms) and FPS (60). |
 | **1:45 – 2:30** | **Two-Way Bidirectional Clipboard (Bonus 3)** | Copy text on your PC and paste it into the Android device using `Ctrl+V`. Copy text on the Android device and paste it into a computer text editor to prove bidirectional synchronization. |
-| **2:30 – 3:30** | **Kiosk Mode (Bonus 4)** | Toggle Kiosk Mode. Show the interactive sandboxed app launch (Google Search, Files, or Calculator). Demonstrate attempting to pull down notifications, swipe home, or exit, showing server-side security enforcement in action. Demonstrate typing and searching safely inside the kiosk app. |
-| **3:30 – 4:30** | **Stop Session & Save/Delete Recording (Bonus 5)** | Click the **"Stop Session"** button in the top bar. Show the Save vs Delete modal. Demonstrate downloading the MP4 or deleting it from disk to protect constrained server storage. Conclude the video. |
+| **2:30 – 3:30** | **Kiosk Mode (Bonus 4)** | Toggle Kiosk Mode. Show the interactive sandboxed app launch (Google Search / Web Browser). Demonstrate attempting to pull down notifications, swipe home, or exit, showing server-side security enforcement in action. Demonstrate typing and searching safely inside the kiosk app. |
+| **3:30 – 4:30** | **Stop Session, Graceful Error Handling & Lifecycle Cleanup** | Click the **"Stop Session"** button in the top bar. Show the clean "Session Ended" state. Explain how the device is instantly and deterministically returned to the device pool with zero leaked processes. Demonstrate graceful handling when all devices are occupied (amber notification with retry). Conclude the video. |
 

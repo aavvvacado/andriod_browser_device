@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:http/http.dart' as http;
 import 'package:web/web.dart' as web;
 import 'core/di/injection_container.dart';
 import 'core/theme/app_theme.dart';
@@ -143,29 +142,7 @@ class _DeviceSessionScreenState extends State<DeviceSessionScreen> {
                       } else if (state is SessionEnded) {
                         return _buildSessionEndedCard(context, state);
                       } else if (state is SessionError) {
-                        return Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.error_outline_rounded, color: AppTheme.danger, size: 54),
-                              const SizedBox(height: 16),
-                              Text(
-                                'Session Error: ${state.message}',
-                                style: const TextStyle(color: Colors.white, fontSize: 16),
-                              ),
-                              const SizedBox(height: 16),
-                              ElevatedButton.icon(
-                                onPressed: _connectToBackend,
-                                icon: const Icon(Icons.refresh_rounded),
-                                label: const Text('Retry Connection'),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: AppTheme.primary,
-                                  foregroundColor: Colors.white,
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
+                        return _buildSessionErrorCard(context, state);
                       } else {
                         return Center(
                           child: ElevatedButton.icon(
@@ -195,17 +172,17 @@ class _DeviceSessionScreenState extends State<DeviceSessionScreen> {
   Widget _buildSessionEndedCard(BuildContext context, SessionEnded state) {
     return Center(
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 540),
-        padding: const EdgeInsets.all(32),
+        constraints: const BoxConstraints(maxWidth: 480),
+        padding: const EdgeInsets.all(36),
         decoration: BoxDecoration(
           color: AppTheme.surface.withValues(alpha: 0.95),
           borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.4),
-              blurRadius: 20,
-              offset: const Offset(0, 8),
+              color: Colors.black.withValues(alpha: 0.45),
+              blurRadius: 28,
+              offset: const Offset(0, 10),
             ),
           ],
         ),
@@ -215,95 +192,111 @@ class _DeviceSessionScreenState extends State<DeviceSessionScreen> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: AppTheme.primary.withValues(alpha: 0.15),
+                color: AppTheme.success.withValues(alpha: 0.15),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.video_library_rounded, color: AppTheme.primaryLight, size: 48),
+              child: const Icon(Icons.check_circle_outline_rounded, color: AppTheme.success, size: 48),
             ),
             const SizedBox(height: 20),
             const Text(
-              'Session Ended',
+              'Session Ended Cleanly',
               style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
             ),
             const SizedBox(height: 8),
             Text(
-              'Session: ${state.sessionId} • ${state.deviceModel}',
+              '${state.deviceModel} • ${state.sessionId}',
               style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13, fontFamily: 'monospace'),
             ),
             const SizedBox(height: 16),
             const Text(
-              'This session was automatically recorded. Would you like to save and download the recording, or delete it from the server to free disk space?',
+              'Your Android session has concluded. All dedicated scrcpy processes, ADB tunnels, and buffers have been deterministically cleaned up and the device returned to the pool.',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.5),
             ),
             const SizedBox(height: 28),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                // Option 1: Delete recording
-                OutlinedButton.icon(
-                  onPressed: () async {
-                    context.read<SessionBloc>().add(DeleteRecordingEvent(state.sessionId));
-                    try {
-                      final host = web.window.location.host.isNotEmpty ? web.window.location.host : 'localhost:3000';
-                      final protocol = web.window.location.protocol.startsWith('https') ? 'https:' : 'http:';
-                      await http.delete(Uri.parse('$protocol//$host/api/recordings/${state.sessionId}'));
-                    } catch (_) {}
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Recording deleted from server to reclaim disk space'),
-                          behavior: SnackBarBehavior.floating,
-                          duration: Duration(seconds: 2),
-                        ),
-                      );
-                    }
-                  },
-                  icon: const Icon(Icons.delete_outline_rounded, color: AppTheme.danger),
-                  label: const Text('Delete Recording', style: TextStyle(color: AppTheme.danger, fontWeight: FontWeight.bold)),
-                  style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: AppTheme.danger),
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                // Option 2: Save and Download recording
-                ElevatedButton.icon(
-                  onPressed: () async {
-                    context.read<SessionBloc>().add(SaveRecordingEvent(state.sessionId));
-                    try {
-                      final host = web.window.location.host.isNotEmpty ? web.window.location.host : 'localhost:3000';
-                      final protocol = web.window.location.protocol.startsWith('https') ? 'https:' : 'http:';
-                      await http.post(Uri.parse('$protocol//$host/api/recordings/${state.sessionId}/save'));
-                      final downloadUrl = '$protocol//$host/api/recordings/${state.sessionId}';
-                      web.window.open(downloadUrl, '_blank');
-                    } catch (_) {}
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Recording saved and downloading!'),
-                          behavior: SnackBarBehavior.floating,
-                          duration: Duration(seconds: 2),
-                        ),
-                      );
-                    }
-                  },
-                  icon: const Icon(Icons.download_rounded, color: Colors.white),
-                  label: const Text('Save & Download MP4', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.success,
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                ),
-              ],
+            ElevatedButton.icon(
+              onPressed: _connectToBackend,
+              icon: const Icon(Icons.play_arrow_rounded),
+              label: const Text('Start New Session', style: TextStyle(fontWeight: FontWeight.bold)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSessionErrorCard(BuildContext context, SessionError state) {
+    final isOccupied = state.message.toLowerCase().contains('occupied') ||
+        state.message.toLowerCase().contains('capacity') ||
+        state.message.toLowerCase().contains('leased') ||
+        state.message.toLowerCase().contains('in use');
+
+    return Center(
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 480),
+        padding: const EdgeInsets.all(36),
+        decoration: BoxDecoration(
+          color: AppTheme.surface.withValues(alpha: 0.95),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(
+            color: (isOccupied ? Colors.amber : AppTheme.danger).withValues(alpha: 0.3),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.45),
+              blurRadius: 28,
+              offset: const Offset(0, 10),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: (isOccupied ? Colors.amber : AppTheme.danger).withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                isOccupied ? Icons.devices_other_rounded : Icons.wifi_off_rounded,
+                color: isOccupied ? Colors.amber : AppTheme.danger,
+                size: 48,
+              ),
             ),
             const SizedBox(height: 20),
-            TextButton.icon(
+            Text(
+              isOccupied ? 'All Devices Occupied' : 'Session Connection Error',
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              isOccupied
+                ? 'All isolated Android instances in the server pool are currently in use by active parallel sessions. A device will become available as soon as an active session is closed.'
+                : state.message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.5),
+            ),
+            const SizedBox(height: 28),
+            ElevatedButton.icon(
               onPressed: _connectToBackend,
-              icon: const Icon(Icons.play_arrow_rounded, color: AppTheme.primaryLight),
-              label: const Text('Start New Session', style: TextStyle(color: AppTheme.primaryLight)),
+              icon: const Icon(Icons.refresh_rounded),
+              label: Text(
+                isOccupied ? 'Check Availability & Retry' : 'Retry Connection',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: isOccupied ? Colors.amber.shade700 : AppTheme.primary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
             ),
           ],
         ),

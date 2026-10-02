@@ -22,20 +22,6 @@ class DisconnectSessionEvent extends SessionEvent {}
 
 class StopSessionEvent extends SessionEvent {}
 
-class SaveRecordingEvent extends SessionEvent {
-  final String sessionId;
-  const SaveRecordingEvent(this.sessionId);
-  @override
-  List<Object?> get props => [sessionId];
-}
-
-class DeleteRecordingEvent extends SessionEvent {
-  final String sessionId;
-  const DeleteRecordingEvent(this.sessionId);
-  @override
-  List<Object?> get props => [sessionId];
-}
-
 class SessionPacketReceivedEvent extends SessionEvent {
   final dynamic packet;
   const SessionPacketReceivedEvent(this.packet);
@@ -80,16 +66,14 @@ class SessionConnected extends SessionState {
 class SessionEnded extends SessionState {
   final String sessionId;
   final String deviceModel;
-  final String recordingUrl;
 
   const SessionEnded({
     required this.sessionId,
     this.deviceModel = 'Android Device',
-    this.recordingUrl = '',
   });
 
   @override
-  List<Object?> get props => [sessionId, deviceModel, recordingUrl];
+  List<Object?> get props => [sessionId, deviceModel];
 }
 
 class SessionDisconnected extends SessionState {
@@ -115,8 +99,6 @@ class SessionBloc extends Bloc<SessionEvent, SessionState> {
     on<ConnectSessionEvent>(_onConnect);
     on<DisconnectSessionEvent>(_onDisconnect);
     on<StopSessionEvent>(_onStopSession);
-    on<SaveRecordingEvent>(_onSaveRecording);
-    on<DeleteRecordingEvent>(_onDeleteRecording);
     on<SessionPacketReceivedEvent>(_onPacketReceived);
   }
 
@@ -146,18 +128,8 @@ class SessionBloc extends Bloc<SessionEvent, SessionState> {
       emit(SessionEnded(
         sessionId: s.metadata.sessionId,
         deviceModel: s.metadata.model,
-        recordingUrl: '/api/recordings/${s.metadata.sessionId}',
       ));
     }
-  }
-
-  Future<void> _onSaveRecording(SaveRecordingEvent event, Emitter<SessionState> emit) async {
-    repository.sendSaveRecording(event.sessionId);
-  }
-
-  Future<void> _onDeleteRecording(DeleteRecordingEvent event, Emitter<SessionState> emit) async {
-    repository.sendDeleteRecording(event.sessionId);
-    emit(SessionInitial());
   }
 
   void _onPacketReceived(SessionPacketReceivedEvent event, Emitter<SessionState> emit) {
@@ -194,7 +166,6 @@ class SessionBloc extends Bloc<SessionEvent, SessionState> {
         emit(SessionEnded(
           sessionId: data['sessionId'] ?? '',
           deviceModel: data['deviceModel'] ?? 'Android Device',
-          recordingUrl: data['recordingUrl'] ?? '',
         ));
       } else if (type == 'closed') {
         if (state is SessionConnected) {
@@ -202,7 +173,6 @@ class SessionBloc extends Bloc<SessionEvent, SessionState> {
           emit(SessionEnded(
             sessionId: s.metadata.sessionId,
             deviceModel: s.metadata.model,
-            recordingUrl: '/api/recordings/${s.metadata.sessionId}',
           ));
         } else {
           emit(SessionDisconnected(reason: data['reason'] ?? 'Connection closed'));

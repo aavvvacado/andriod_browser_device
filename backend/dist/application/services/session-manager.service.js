@@ -6,7 +6,6 @@ const child_process_1 = require("child_process");
 const util_1 = require("util");
 const session_js_1 = require("../../domain/entities/session.js");
 const websocket_broadcaster_adapter_js_1 = require("../../infrastructure/websocket/websocket-broadcaster.adapter.js");
-const session_recorder_service_js_1 = require("../../infrastructure/recording/session-recorder.service.js");
 const logger_js_1 = require("../../core/logger.js");
 const config_js_1 = require("../../core/config.js");
 const execAsync = (0, util_1.promisify)(child_process_1.exec);
@@ -116,7 +115,6 @@ class SessionManagerService {
         const scrcpySession = await this.scrcpyManager.startSession(device.serial);
         const sessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
         const broadcaster = new websocket_broadcaster_adapter_js_1.WebSocketStreamBroadcaster();
-        const recorder = new session_recorder_service_js_1.SessionRecorder(sessionId, device.serial, device.model, clientToken);
         // Detect installed interactive kiosk target dynamically (Google Search, Files, Calculator, or Settings)
         const kioskTarget = await this.detectKioskApp(device.serial);
         const session = {
@@ -126,7 +124,6 @@ class SessionManagerService {
             deviceModel: device.model,
             scrcpySession,
             broadcaster,
-            recorder,
             socket,
             createdAt: Date.now(),
             lastActivityAt: Date.now(),
@@ -225,24 +222,6 @@ class SessionManagerService {
                     this.logger.info(`Client ${clientId} requested explicit stop_session.`);
                     await this.terminateClientSession(session);
                     break;
-                case 'save_recording': {
-                    const targetId = event.sessionId || session.sessionId;
-                    this.logger.info(`Client ${clientId} saved recording for ${targetId}`);
-                    session_recorder_service_js_1.SessionRecorder.saveRecording(targetId);
-                    if (session.socket.readyState === 1) {
-                        session.socket.send(JSON.stringify({ type: 'recording_saved', sessionId: targetId }));
-                    }
-                    break;
-                }
-                case 'delete_recording': {
-                    const targetId = event.sessionId || session.sessionId;
-                    this.logger.info(`Client ${clientId} requested deletion of recording for ${targetId}`);
-                    session_recorder_service_js_1.SessionRecorder.deleteRecording(targetId);
-                    if (session.socket.readyState === 1) {
-                        session.socket.send(JSON.stringify({ type: 'recording_deleted', sessionId: targetId }));
-                    }
-                    break;
-                }
             }
         }
         catch (err) {
@@ -314,9 +293,7 @@ class SessionManagerService {
                 const { done, value } = await reader.read();
                 if (done)
                     break;
-                // 1. Write packet to automatic session recorder (Bonus 5)
-                session.recorder.writePacket(value.data);
-                // 2. Stream to browser WebCodecs decoder
+                // Stream directly to browser WebCodecs decoder (Zero disk I/O, zero recording overhead)
                 if (value.type === 'configuration') {
                     let codec = 'avc1.42001f';
                     try {
@@ -368,12 +345,11 @@ class SessionManagerService {
             clearInterval(session.kioskWatchdogInterval);
             session.kioskWatchdogInterval = undefined;
         }
-        // Stop and finalize session recording into MP4 container (Bonus 5)
-        try {
-            await session.recorder.stop();
-        }
-        catch (err) {
-            this.logger.warn(`Failed cleanly stopping recorder: ${err.message}`);
+        if (session.reader) {
+            try {
+                session.reader.releaseLock();
+            }
+            catch (_) { }
         }
         // Close scrcpy session
         try {
@@ -382,7 +358,7 @@ class SessionManagerService {
         catch (err) {
             this.logger.warn(`Failed closing scrcpy session: ${err.message}`);
         }
-        // Release device back to pool (Bonus 1 & 2)
+        // Release device back to pool deterministically (Zero leak guarantee)
         try {
             await this.devicePool.releaseDevice(session.deviceSerial);
         }
@@ -398,9 +374,7 @@ class SessionManagerService {
                     type: 'session_ended',
                     sessionId: endedSessionId,
                     deviceModel: session.deviceModel,
-                    recordingUrl: `/api/recordings/${endedSessionId}`,
                 }));
-                // Give client a moment to receive the message before closing socket
                 setTimeout(() => {
                     try {
                         if (session.socket.readyState === 1) {
@@ -408,19 +382,10 @@ class SessionManagerService {
                         }
                     }
                     catch (_) { }
-                }, 3000);
+                }, 1000);
             }
         }
         catch (_) { }
-        // Auto-prune unsaved recording if session closed abandoned
-        // If the recording is not saved within 60 seconds, delete it to prevent filling disk
-        setTimeout(() => {
-            const meta = session_recorder_service_js_1.SessionRecorder.getMetadata(endedSessionId);
-            if (meta && meta.saved !== true) {
-                this.logger.info(`Auto-pruning unsaved recording for ended session ${endedSessionId} to protect disk space`);
-                session_recorder_service_js_1.SessionRecorder.deleteRecording(endedSessionId);
-            }
-        }, 60000);
         this.sessions.delete(session.clientId);
         this.logger.info(`Session ${endedSessionId} cleanly terminated and all resources freed.`);
     }

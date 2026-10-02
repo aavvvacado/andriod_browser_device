@@ -3,7 +3,6 @@ import fs from 'fs';
 import path from 'path';
 import { SessionManagerService } from '../../application/services/session-manager.service.js';
 import { IDevicePoolRepository } from '../../domain/repositories/device-pool.repository.js';
-import { SessionRecorder } from '../../infrastructure/recording/session-recorder.service.js';
 import { Logger } from '../../core/logger.js';
 
 export function createHttpServer(
@@ -12,7 +11,6 @@ export function createHttpServer(
 ): http.Server {
   const logger = new Logger('HttpServer');
   const publicDir = path.resolve(process.cwd(), 'public');
-  const recordingsDir = path.resolve(process.cwd(), 'recordings');
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
@@ -20,7 +18,7 @@ export function createHttpServer(
 
     // CORS headers for local APIs
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
     if (req.method === 'OPTIONS') {
@@ -51,111 +49,6 @@ export function createHttpServer(
           devices: availableDevices,
         }
       }, null, 2));
-      return;
-    }
-
-    // Bonus 5: List recorded sessions (strictly isolated per machine/client)
-    if (pathname === '/api/recordings' && req.method === 'GET') {
-      const onlySaved = url.searchParams.get('saved') === 'true';
-      const clientToken = url.searchParams.get('clientToken') || (req.headers['x-client-token'] as string) || '';
-      const recordings = SessionRecorder.listRecordings(process.cwd(), onlySaved, clientToken);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(recordings, null, 2));
-      return;
-    }
-
-    // Save recording endpoint: POST /api/recordings/:sessionId/save
-    if (pathname.startsWith('/api/recordings/') && pathname.endsWith('/save') && req.method === 'POST') {
-      const targetId = pathname.replace('/api/recordings/', '').replace('/save', '').trim();
-      const clientToken = url.searchParams.get('clientToken') || (req.headers['x-client-token'] as string) || '';
-      const existingMeta = SessionRecorder.getMetadata(targetId);
-      if (existingMeta && existingMeta.clientToken && clientToken && existingMeta.clientToken !== clientToken) {
-        res.writeHead(403, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Access denied: this recording belongs to another session' }));
-        return;
-      }
-      const meta = SessionRecorder.saveRecording(targetId);
-      if (meta) {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, message: 'Recording saved', metadata: meta }));
-      } else {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: 'Recording not found' }));
-      }
-      return;
-    }
-
-    // Delete recording endpoint: DELETE /api/recordings/:sessionId or POST /api/recordings/:sessionId/delete
-    if (
-      (pathname.startsWith('/api/recordings/') && req.method === 'DELETE') ||
-      (pathname.startsWith('/api/recordings/') && pathname.endsWith('/delete') && req.method === 'POST')
-    ) {
-      const targetId = pathname.replace('/api/recordings/', '').replace('/delete', '').trim();
-      const clientToken = url.searchParams.get('clientToken') || (req.headers['x-client-token'] as string) || '';
-      const existingMeta = SessionRecorder.getMetadata(targetId);
-      if (existingMeta && existingMeta.clientToken && clientToken && existingMeta.clientToken !== clientToken) {
-        res.writeHead(403, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Access denied: this recording belongs to another session' }));
-        return;
-      }
-      const deleted = SessionRecorder.deleteRecording(targetId);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: deleted, deletedId: targetId, message: deleted ? 'Recording deleted from server' : 'File already deleted' }));
-      return;
-    }
-
-    // Bonus 5: Download or stream specific session recording (MP4 with Range support)
-    if (pathname.startsWith('/api/recordings/') && req.method === 'GET') {
-      const targetId = pathname.replace('/api/recordings/', '').trim();
-      const clientToken = url.searchParams.get('clientToken') || (req.headers['x-client-token'] as string) || '';
-      const meta = SessionRecorder.getMetadata(targetId);
-      if (meta && meta.clientToken && clientToken && meta.clientToken !== clientToken) {
-        res.writeHead(403, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Access denied: this recording belongs to another session' }));
-        return;
-      }
-
-      let targetFile = path.join(recordingsDir, `${targetId}.mp4`);
-      let contentType = 'video/mp4';
-
-      if (!fs.existsSync(targetFile)) {
-        targetFile = path.join(recordingsDir, `${targetId}.h264`);
-        contentType = 'application/octet-stream';
-      }
-
-      if (!fs.existsSync(targetFile)) {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Recording not found' }));
-        return;
-      }
-
-      const stat = fs.statSync(targetFile);
-      const fileSize = stat.size;
-      const range = req.headers.range;
-
-      if (range) {
-        const parts = range.replace(/bytes=/, '').split('-');
-        const start = parseInt(parts[0], 10);
-        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-        const chunksize = (end - start) + 1;
-        const file = fs.createReadStream(targetFile, { start, end });
-
-        res.writeHead(206, {
-          'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-          'Accept-Ranges': 'bytes',
-          'Content-Length': chunksize,
-          'Content-Type': contentType,
-        });
-        file.pipe(res);
-      } else {
-        res.writeHead(200, {
-          'Content-Length': fileSize,
-          'Content-Type': contentType,
-          'Accept-Ranges': 'bytes',
-          'Content-Disposition': `attachment; filename="${path.basename(targetFile)}"`,
-        });
-        fs.createReadStream(targetFile).pipe(res);
-      }
       return;
     }
 

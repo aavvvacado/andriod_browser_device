@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../bloc/session_bloc.dart';
 import '../../../latency/presentation/bloc/latency_bloc.dart';
-import '../widgets/recordings_dialog.dart';
 import '../../../../core/theme/app_theme.dart';
 
 class SessionHeaderBar extends StatelessWidget {
@@ -176,46 +175,11 @@ class SessionHeaderBar extends StatelessWidget {
                 },
               ),
 
-              // Right: Session Actions (Recordings & Stop Session)
+              // Right: Session Actions (Stop Session)
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Recordings Shortcut Button
-                  InkWell(
-                    onTap: () {
-                      showDialog(
-                        context: context,
-                        builder: (_) => const RecordingsDialog(),
-                      );
-                    },
-                    borderRadius: BorderRadius.circular(10),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: AppTheme.surfaceLight.withValues(alpha: 0.6),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.video_library_rounded, size: 15, color: AppTheme.primaryLight),
-                          SizedBox(width: 6),
-                          Text(
-                            'Recordings',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
                   if (isConnected) ...[
-                    const SizedBox(width: 10),
                     ElevatedButton.icon(
                       onPressed: () {
                         context.read<SessionBloc>().add(StopSessionEvent());

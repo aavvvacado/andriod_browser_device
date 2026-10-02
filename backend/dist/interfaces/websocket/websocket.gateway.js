@@ -35,18 +35,36 @@ class WebSocketGateway {
                         this.logger.error(`Failed parsing client ${clientId} message:`, err.message);
                     }
                 });
-                ws.on('close', () => {
-                    this.logger.info(`WebSocket client ${clientId} disconnected`);
+                ws.on('close', (code, reason) => {
+                    this.logger.info(`WebSocket client ${clientId} disconnected (code: ${code}, reason: ${reason?.toString() || 'none'})`);
                     this.sessionManager.handleClientDisconnected(clientId);
                 });
                 ws.on('error', (err) => {
-                    this.logger.error(`WebSocket error for client ${clientId}:`, err);
+                    this.logger.error(`WebSocket socket error for client ${clientId}:`, err?.message || err);
+                    this.sessionManager.handleClientDisconnected(clientId);
                 });
             }
             catch (err) {
-                this.logger.error(`Failed to initialize session for client ${clientId}:`, err);
-                ws.send(JSON.stringify({ type: 'error', message: err.message }));
-                ws.close();
+                this.logger.error(`Failed to initialize session for client ${clientId}:`, err?.message || err);
+                const isCapacity = err?.message && (err.message.includes('capacity') || err.message.includes('leased') || err.message.includes('No Android devices'));
+                try {
+                    if (ws.readyState === ws_1.WebSocket.OPEN) {
+                        ws.send(JSON.stringify({
+                            type: 'error',
+                            code: isCapacity ? 'POOL_EXHAUSTED' : 'INITIALIZATION_FAILED',
+                            message: isCapacity
+                                ? 'All Android devices in the pool are currently occupied by active sessions. Please wait a moment for a device to be released and try again.'
+                                : (err?.message || 'Failed to initialize device session'),
+                        }));
+                    }
+                }
+                catch (_) { }
+                setTimeout(() => {
+                    try {
+                        ws.close(1008, isCapacity ? 'Device pool occupied' : 'Init failed');
+                    }
+                    catch (_) { }
+                }, 150);
             }
         });
     }

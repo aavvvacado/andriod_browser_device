@@ -3,7 +3,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:web/web.dart' as web;
 import 'dart:js_interop';
 import '../bloc/input_bloc.dart';
-import '../../../session/presentation/widgets/recordings_dialog.dart';
 import '../../../../core/theme/app_theme.dart';
 
 class DeviceControlsBar extends StatelessWidget {
@@ -112,22 +111,6 @@ class DeviceControlsBar extends StatelessWidget {
                       _showManualPasteDialog(context);
                     }
                   }
-                },
-              ),
-              const SizedBox(height: 8),
-
-              // Section 3: Session Recordings (Bonus 5)
-              _buildFeatureButton(
-                context,
-                icon: Icons.video_library_rounded,
-                label: 'Recordings',
-                subtitle: 'Auto-Saved MP4',
-                accentColor: AppTheme.primaryLight,
-                onTap: () {
-                  showDialog(
-                    context: context,
-                    builder: (_) => const RecordingsDialog(),
-                  );
                 },
               ),
 

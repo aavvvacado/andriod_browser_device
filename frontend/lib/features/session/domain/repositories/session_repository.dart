@@ -26,8 +26,6 @@ abstract class ISessionRepository {
   void sendKioskToggle({required bool enabled, String? package});
   void sendPing(double clientTime);
   void sendStopSession();
-  void sendSaveRecording(String sessionId);
-  void sendDeleteRecording(String sessionId);
   bool get isConnected;
 }
 
