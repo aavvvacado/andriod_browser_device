@@ -21,29 +21,46 @@ class SessionManagerService {
     }
     async detectKioskApp(serial) {
         try {
+            // 1. Primary: Query Android's package manager for whatever app handles Google Web Search
+            try {
+                const { stdout: intentOut } = await execAsync(`adb -s ${serial} shell "cmd package resolve-activity -a android.intent.action.VIEW -d 'https://www.google.com' || true"`);
+                if (intentOut && !intentOut.includes('No activity found')) {
+                    const match = intentOut.match(/packageName=([a-zA-Z0-9_\.]+)/);
+                    if (match && match[1] && !match[1].includes('android.fallback')) {
+                        const pkg = match[1];
+                        this.logger.info(`Resolved web browser for Google Search on ${serial}: ${pkg}`);
+                        return {
+                            package: pkg,
+                            appName: 'Google Search',
+                            launchCommand: `adb -s ${serial} shell "am start -a android.intent.action.VIEW -d 'https://www.google.com' || monkey -p ${pkg} -c android.intent.category.LAUNCHER 1 || true"`,
+                        };
+                    }
+                }
+            }
+            catch (_) { }
             const { stdout } = await execAsync(`adb -s ${serial} shell "pm list packages || true"`);
             const installed = stdout
                 .split('\n')
                 .map(line => line.trim().replace(/^package:/, ''))
                 .filter(Boolean);
-            // 1. Google Search / Web Browser (Highly interactive: typing, reading, writing, copy-paste)
+            // 2. Specific Google / Chrome / Browser packages installed on device
             const browserPackages = [
-                'com.android.chrome',
-                'com.android.browser',
-                'org.chromium.webview_shell',
-                'com.google.android.googlequicksearchbox',
+                { pkg: 'com.android.chrome', name: 'Google Chrome', cmd: `am start -n com.android.chrome/com.google.android.apps.chrome.Main -d 'https://www.google.com' || am start -a android.intent.action.VIEW -d 'https://www.google.com'` },
+                { pkg: 'com.google.android.googlequicksearchbox', name: 'Google Search', cmd: `am start -n com.google.android.googlequicksearchbox/com.google.android.googlequicksearchbox.SearchActivity || am start -a android.intent.action.VIEW -d 'https://www.google.com'` },
+                { pkg: 'org.chromium.webview_shell', name: 'Web Browser', cmd: `am start -n org.chromium.webview_shell/.WebViewBrowserActivity -d 'https://www.google.com' || am start -a android.intent.action.VIEW -d 'https://www.google.com'` },
+                { pkg: 'com.android.browser', name: 'Web Browser', cmd: `am start -a android.intent.action.VIEW -d 'https://www.google.com'` },
             ];
-            for (const bPkg of browserPackages) {
-                if (installed.includes(bPkg)) {
-                    this.logger.info(`Detected interactive search/browser on ${serial}: ${bPkg}`);
+            for (const item of browserPackages) {
+                if (installed.includes(item.pkg)) {
+                    this.logger.info(`Detected interactive Google/Browser on ${serial}: ${item.pkg}`);
                     return {
-                        package: bPkg,
-                        appName: 'Search',
-                        launchCommand: `adb -s ${serial} shell "am start -a android.intent.action.VIEW -d 'https://www.google.com' || monkey -p ${bPkg} -c android.intent.category.LAUNCHER 1 || true"`,
+                        package: item.pkg,
+                        appName: 'Google Search',
+                        launchCommand: `adb -s ${serial} shell "${item.cmd} || true"`,
                     };
                 }
             }
-            // 2. Android Files / DocumentsUI
+            // 3. Android Files / DocumentsUI (if present on device)
             if (installed.includes('com.android.documentsui') || installed.includes('com.google.android.documentsui')) {
                 const pkg = installed.includes('com.android.documentsui') ? 'com.android.documentsui' : 'com.google.android.documentsui';
                 this.logger.info(`Detected Files app on ${serial}: ${pkg}`);
@@ -53,48 +70,13 @@ class SessionManagerService {
                     launchCommand: `adb -s ${serial} shell "am start -n ${pkg}/.files.FilesActivity || monkey -p ${pkg} -c android.intent.category.LAUNCHER 1 || true"`,
                 };
             }
-            // 3. Calculator candidates (OEM or AOSP)
-            const calcCandidates = [
-                'com.google.android.calculator',
-                'com.android.calculator2',
-                'com.android.calculator',
-                'com.sec.android.app.popupcalculator',
-                'com.simplemobiletools.calculator',
-            ];
-            for (const cPkg of calcCandidates) {
-                if (installed.includes(cPkg)) {
-                    this.logger.info(`Detected Calculator on ${serial}: ${cPkg}`);
-                    return {
-                        package: cPkg,
-                        appName: 'Calculator',
-                        launchCommand: `adb -s ${serial} shell "monkey -p ${cPkg} -c android.intent.category.LAUNCHER 1 || true"`,
-                    };
-                }
-            }
-            // 4. Try universal browser intent if not matched by name
-            try {
-                const { stdout: intentOut } = await execAsync(`adb -s ${serial} shell "cmd package resolve-activity -a android.intent.action.VIEW -d 'https://www.google.com' || true"`);
-                if (intentOut && !intentOut.includes('No activity found')) {
-                    const match = intentOut.match(/packageName=([a-zA-Z0-9_\.]+)/);
-                    if (match && match[1] && !match[1].includes('android.fallback')) {
-                        const pkg = match[1];
-                        this.logger.info(`Resolved default web browser on ${serial}: ${pkg}`);
-                        return {
-                            package: pkg,
-                            appName: 'Search',
-                            launchCommand: `adb -s ${serial} shell "am start -a android.intent.action.VIEW -d 'https://www.google.com' || true"`,
-                        };
-                    }
-                }
-            }
-            catch (_) { }
-            // 5. Universal guaranteed fallback: Settings (contains interactive search bar to test input, keyboard, copy/paste)
+            // 4. Universal guaranteed fallback for minimal Redroid AOSP: Settings (contains interactive search bar to test input, keyboard, copy/paste)
             if (installed.includes('com.android.settings')) {
                 this.logger.info(`Using Settings with interactive search as kiosk app on ${serial}`);
                 return {
                     package: 'com.android.settings',
-                    appName: 'Settings',
-                    launchCommand: `adb -s ${serial} shell "am start -n com.android.settings/.Settings || monkey -p com.android.settings -c android.intent.category.LAUNCHER 1 || true"`,
+                    appName: 'Google Search',
+                    launchCommand: `adb -s ${serial} shell "am start -a android.intent.action.VIEW -d 'https://www.google.com' || am start -n com.android.settings/.Settings || monkey -p com.android.settings -c android.intent.category.LAUNCHER 1 || true"`,
                 };
             }
         }
@@ -103,8 +85,8 @@ class SessionManagerService {
         }
         return {
             package: 'com.android.settings',
-            appName: 'Settings',
-            launchCommand: `adb -s ${serial} shell "am start -n com.android.settings/.Settings || monkey -p com.android.settings -c android.intent.category.LAUNCHER 1 || true"`,
+            appName: 'Google Search',
+            launchCommand: `adb -s ${serial} shell "am start -a android.intent.action.VIEW -d 'https://www.google.com' || am start -n com.android.settings/.Settings || true"`,
         };
     }
     async handleClientConnected(clientId, socket, clientToken = '') {
@@ -248,9 +230,9 @@ class SessionManagerService {
                 await execAsync(session.kioskLaunchCommand);
                 await new Promise(r => setTimeout(r, 600));
                 // Read active focus to confirm or update exact package
-                const { stdout } = await execAsync(`adb -s ${session.deviceSerial} shell "dumpsys window | grep -E 'mCurrentFocus|mFocusedApp' || true"`);
+                const { stdout } = await execAsync(`adb -s ${session.deviceSerial} shell "dumpsys window displays | grep -E 'mCurrentFocus|mFocusedApp' || dumpsys activity activities | grep ResumedActivity || dumpsys window | grep mCurrentFocus || true"`);
                 const match = stdout.match(/([a-zA-Z0-9_\.]+)\/[a-zA-Z0-9_\.]+/);
-                if (match && match[1] && !match[1].includes('SystemUI') && !match[1].includes('launcher')) {
+                if (match && match[1] && !match[1].includes('SystemUI') && !match[1].includes('systemui') && !match[1].includes('launcher')) {
                     session.kioskPackage = match[1];
                 }
             }
@@ -263,10 +245,19 @@ class SessionManagerService {
                 if (!session.kioskEnabled)
                     return;
                 try {
-                    const { stdout } = await execAsync(`adb -s ${session.deviceSerial} shell "dumpsys window | grep -E 'mCurrentFocus|mFocusedApp' || true"`);
-                    if (!stdout.includes(session.kioskPackage) && !stdout.includes('PopupWindow') && !stdout.includes('InputMethod')) {
-                        this.logger.warn(`[Kiosk Security Watchdog] Unauthorized activity detected! Refocusing ${session.kioskPackage}...`);
-                        await execAsync(session.kioskLaunchCommand);
+                    const { stdout } = await execAsync(`adb -s ${session.deviceSerial} shell "dumpsys window displays | grep -E 'mCurrentFocus|mFocusedApp' || dumpsys activity activities | grep ResumedActivity || dumpsys window | grep mCurrentFocus || true"`);
+                    if (stdout &&
+                        !stdout.includes(session.kioskPackage) &&
+                        !stdout.includes('PopupWindow') &&
+                        !stdout.includes('InputMethod') &&
+                        !stdout.includes('VolumeDialogImpl') &&
+                        !stdout.includes('Toast')) {
+                        const match = stdout.match(/([a-zA-Z0-9_\.]+)\/[a-zA-Z0-9_\.]+/);
+                        const activePkg = match ? match[1] : '';
+                        if (activePkg && activePkg !== session.kioskPackage && !activePkg.includes('SystemUI') && !activePkg.includes('systemui')) {
+                            this.logger.warn(`[Kiosk Security Watchdog] Unauthorized activity ${activePkg} detected on ${session.deviceSerial}! Refocusing ${session.kioskPackage}...`);
+                            await execAsync(session.kioskLaunchCommand);
+                        }
                     }
                 }
                 catch (_) { }

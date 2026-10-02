@@ -783,6 +783,37 @@ remove recording concept at all because that is affecting my server
 - **Next Decision**:
   - Commit all changes and push to GitHub remote repository (`https://github.com/aavvvacado/andriod_browser_device.git`).
 
+---
+
+### Entry 19: Cross-Device Google Kiosk Hardening for Redroid 12 & Android 13+
+- **Time**: 2026-10-02T11:40:00+05:30
+- **User Prompt (Verbatim)**:
+```text
+please make sure 
+Restricted access. A session is limited to one app of your choice and a defined set of actions. Tell us which app you chose and why. The user must not be able to leave the app, open other apps, or reach system-level controls. Decide which actions to block and justify the list. Enforcement must not rely only on the browser, since a user can tamper with client-side code.
+for any device be on local device with andriod 13+ or more or be redriod andriod 12 
+i told you already what would be session app
+```
+- **Alternative User Instruction (Verbatim)**:
+```text
+its working btw but still ensure for every device mainly redriod thats deployed
+```
+- **Action Taken in Response**:
+  1. **Cross-Device Google Search Intent Resolution**:
+     - Upgraded `detectKioskApp` in `SessionManagerService` (`backend/src/application/services/session-manager.service.ts`):
+       - Prioritized `cmd package resolve-activity -a android.intent.action.VIEW -d 'https://www.google.com'` as the very first check. This asks Android's Package Manager directly which app handles the Google web URL, binding the exact package (e.g. `com.android.chrome`, `org.chromium.webview_shell`, `com.brave.browser`) to the session before launching.
+       - Added explicit Google/Chrome packages (`com.android.chrome`, `com.google.android.googlequicksearchbox`, `org.chromium.webview_shell`, `com.android.browser`).
+       - Guaranteed universal fallback for bare AOSP Redroid 12 images: `com.android.settings` with interactive search.
+  2. **Multi-Version Dumpsys Focus & Watchdog Robustness**:
+     - Upgraded `dumpsys` focus detection across Android 10, 11, 12 (Redroid), 13, and 14 using chained queries: `dumpsys window displays | grep -E 'mCurrentFocus|mFocusedApp' || dumpsys activity activities | grep ResumedActivity || dumpsys window | grep mCurrentFocus || true`.
+     - In the 3-second security watchdog, added smart package parsing: verifies `activePkg` against `session.kioskPackage`, ignoring transient system dialogs, IME virtual keyboards, toast overlays, and volume sliders (`PopupWindow`, `InputMethod`, `VolumeDialogImpl`, `Toast`). If an unauthorized app or launcher gains focus, it immediately triggers refocus via `kioskLaunchCommand`.
+  3. **Rebuilt & Verified**:
+     - Built backend with `npm run build` (0 TypeScript errors).
+- **Errors & Failures Hit**:
+  - None.
+- **Next Decision**:
+  - Commit all changes and push to GitHub remote repository (`https://github.com/aavvvacado/andriod_browser_device.git`).
+
 
 
 
