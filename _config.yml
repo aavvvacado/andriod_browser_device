@@ -1,0 +1,69 @@
+# Documentation site - Stygian theme (docs engine)
+# Renderer: https://github.com/ksauraj/stygian (just-the-docs style)
+title: "Real-Time Android in Browser"
+url: "https://aavvvacado.github.io"
+baseurl: "/andriod_browser_device"
+description: >-
+  A production-grade, low-latency web application streaming live interactive
+  Android devices into browser canvases at 60 FPS with sub-50ms latency using
+  scrcpy-server, hardware WebCodecs, and binary WebSockets.
+
+remote_theme: ksauraj/stygian
+
+plugins:
+  - jekyll-remote-theme
+  - jekyll-seo-tag
+  - jekyll-sitemap
+
+# ------------------------------------------------------------------ build
+markdown: kramdown
+highlighter: rouge
+kramdown:
+  input: GFM
+  auto_ids: true
+  hard_wrap: false
+  syntax_highlighter: rouge
+  syntax_highlighter_opts:
+    block:
+      line_numbers: false
+
+exclude:
+  - README.md
+  - vendor
+
+# ------------------------------------------------------------------ content
+collections:
+  docs:
+    output: true
+    permalink: /:path/
+
+defaults:
+  - scope:
+      path: ""
+      type: docs
+    values:
+      layout: docs
+
+# ------------------------------------------------------------------ theme
+stygian:
+  header:
+    aux_links_new_tab: true
+    aux_links:
+      - { label: "Live App", href: "https://android.aavvvacado.site/" }
+      - { label: "GitHub", href: "https://github.com/aavvvacado/andriod_browser_device" }
+  theme:
+    default: dark
+  syntax_highlighting:
+    enabled: true
+  search:
+    enabled: true
+    placeholder: "Search documentation"
+  back_to_top: true
+  edit:
+    enabled: true
+    repo: https://github.com/aavvvacado/andriod_browser_device
+    branch: gh-pages
+    view: tree
+  footer:
+    note: Real-Time Android Device in the Browser
+    right: "© 2026 aavvvacado"

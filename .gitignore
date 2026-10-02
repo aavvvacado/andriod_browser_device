@@ -1,0 +1,13 @@
+backend/
+frontend/
+spike/
+.idea/
+android/
+android_browser_device.iml
+_site/
+.sass-cache/
+.jekyll-cache/
+.jekyll-metadata
+vendor/
+.DS_Store
+Thumbs.db
