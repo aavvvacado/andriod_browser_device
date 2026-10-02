@@ -1,7 +1,7 @@
 # Real-Time Android Device in the Browser
 
 A production-grade, low-latency web application that mirrors and provides direct, natural mouse and keyboard control over an Android device in the browser—similar to Android Studio Device Mirroring and `scrcpy`.
-
+- **Video link**: [https://drive.google.com/file/d/1HvZyrMxm_DypY8Y2wmbChXn_UaBVHZDj/view?usp=sharing](https://drive.google.com/file/d/1HvZyrMxm_DypY8Y2wmbChXn_UaBVHZDj/view?usp=sharing)
 - **Repository**: [https://github.com/aavvvacado/andriod_browser_device](https://github.com/aavvvacado/andriod_browser_device)
 - **Live Deployed App**: [https://android.aavvvacado.site/](https://android.aavvvacado.site/) *(Production deployment with multi-device pooling)*
 - **AI Process Log**: [`PROCESS_LOG.md`](./PROCESS_LOG.md) *(Compulsory unedited trajectory log)*
@@ -18,7 +18,7 @@ A production-grade, low-latency web application that mirrors and provides direct
 7. [Local Setup & Reproduction Guide](#7-local-setup--reproduction-guide)
 8. [Cloud & Server Deployment Instructions](#8-cloud--server-deployment-instructions)
 9. [Feature Testing Guide](#9-feature-testing-guide)
-10. [3–5 Minute Live Demo Video Guide](#10-35-minute-live-demo-video-guide)
+
 
 ---
 
@@ -394,16 +394,4 @@ docker compose up -d --build
   - The application remains stable with zero unhandled exceptions, zero socket drops, and zero leaked instances.
 
 ---
-
-## 10. 3–5 Minute Live Demo Video Guide
-
-Follow this continuous, uncut walkthrough when recording your demo video:
-
-| Time | Action | What to Narrate |
-| :--- | :--- | :--- |
-| **0:00 – 0:45** | **Introduction & Architecture** | Introduce the application. Explain that it uses `scrcpy-server.jar` for low-latency H.264 capture, binary WebSockets for transport, and hardware WebCodecs `VideoDecoder` in Flutter Web. Highlight the constrained 2 vCPU / 5-6 GB / 12 GB disk server scalability and zero-disk streaming. |
-| **0:45 – 1:45** | **Core Screen Interaction** | Click directly on the mirrored display to open an app. Click and drag to demonstrate smooth swiping. Roll mouse wheel to demonstrate scrolling. Focus a search box and type directly from your physical keyboard. Point out the live RTT (~25ms) and FPS (60). |
-| **1:45 – 2:30** | **Two-Way Bidirectional Clipboard (Bonus 3)** | Copy text on your PC and paste it into the Android device using `Ctrl+V`. Copy text on the Android device and paste it into a computer text editor to prove bidirectional synchronization. |
-| **2:30 – 3:30** | **Kiosk Mode (Bonus 4)** | Toggle Kiosk Mode. Show the interactive sandboxed app launch (Google Search / Web Browser). Demonstrate attempting to pull down notifications, swipe home, or exit, showing server-side security enforcement in action. Demonstrate typing and searching safely inside the kiosk app. |
-| **3:30 – 4:30** | **Stop Session, Graceful Error Handling & Lifecycle Cleanup** | Click the **"Stop Session"** button in the top bar. Show the clean "Session Ended" state. Explain how the device is instantly and deterministically returned to the device pool with zero leaked processes. Demonstrate graceful handling when all devices are occupied (amber notification with retry). Conclude the video. |
 
