@@ -225,6 +225,27 @@ class _DeviceScreenViewState extends State<DeviceScreenView> {
               );
             }
           }
+        } else if (packet['type'] == 'kiosk_status') {
+          final enabled = packet['enabled'] == true;
+          final package = packet['package'] as String?;
+          final appName = packet['appName'] as String?;
+          if (mounted) {
+            context.read<InputBloc>().add(SetKioskStatusEvent(
+              enabled: enabled,
+              package: package,
+              appName: appName,
+            ));
+          }
+        } else if (packet['type'] == 'init') {
+          final package = packet['kioskPackage'] as String?;
+          final appName = packet['kioskAppName'] as String?;
+          if (mounted && appName != null) {
+            context.read<InputBloc>().add(SetKioskStatusEvent(
+              enabled: false,
+              package: package,
+              appName: appName,
+            ));
+          }
         }
       } else if (packet is ByteBuffer) {
         _handleBinaryPacket(packet);

@@ -78,22 +78,41 @@ class SendKioskToggleEvent extends InputEvent {
   List<Object?> get props => [enabled, package];
 }
 
+class SetKioskStatusEvent extends InputEvent {
+  final bool enabled;
+  final String? package;
+  final String? appName;
+  const SetKioskStatusEvent({required this.enabled, this.package, this.appName});
+  @override
+  List<Object?> get props => [enabled, package, appName];
+}
+
 // State
 class InputState extends Equatable {
   final bool isKioskMode;
   final String? kioskPackage;
+  final String kioskAppName;
 
-  const InputState({this.isKioskMode = false, this.kioskPackage});
+  const InputState({
+    this.isKioskMode = false,
+    this.kioskPackage,
+    this.kioskAppName = 'App',
+  });
 
-  InputState copyWith({bool? isKioskMode, String? kioskPackage}) {
+  InputState copyWith({
+    bool? isKioskMode,
+    String? kioskPackage,
+    String? kioskAppName,
+  }) {
     return InputState(
       isKioskMode: isKioskMode ?? this.isKioskMode,
       kioskPackage: kioskPackage ?? this.kioskPackage,
+      kioskAppName: kioskAppName ?? this.kioskAppName,
     );
   }
 
   @override
-  List<Object?> get props => [isKioskMode, kioskPackage];
+  List<Object?> get props => [isKioskMode, kioskPackage, kioskAppName];
 }
 
 // BLoC
@@ -137,6 +156,14 @@ class InputBloc extends Bloc<InputEvent, InputState> {
     on<SendKioskToggleEvent>((event, emit) {
       repository.sendKioskToggle(enabled: event.enabled, package: event.package);
       emit(state.copyWith(isKioskMode: event.enabled, kioskPackage: event.package));
+    });
+
+    on<SetKioskStatusEvent>((event, emit) {
+      emit(state.copyWith(
+        isKioskMode: event.enabled,
+        kioskPackage: event.package,
+        kioskAppName: event.appName ?? state.kioskAppName,
+      ));
     });
   }
 }

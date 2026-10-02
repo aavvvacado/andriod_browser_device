@@ -62,7 +62,7 @@ class DeviceControlsBar extends StatelessWidget {
                 context,
                 icon: isKiosk ? Icons.shield_rounded : Icons.shield_outlined,
                 label: isKiosk ? 'Kiosk Active' : 'Kiosk Mode',
-                subtitle: isKiosk ? 'Locked to Calc' : 'Disabled',
+                subtitle: isKiosk ? 'Locked: ${inputState.kioskAppName}' : 'Single-App Lock',
                 isActive: isKiosk,
                 activeColor: Colors.amber.shade600,
                 onTap: () {
@@ -74,7 +74,7 @@ class DeviceControlsBar extends StatelessWidget {
                     SnackBar(
                       content: Text(
                         newEnabled
-                          ? 'Kiosk Mode ENABLED: Device restricted to Calculator'
+                          ? 'Kiosk Mode ENABLED: Device restricted to ${inputState.kioskAppName}'
                           : 'Kiosk Mode DISABLED: Full device access restored',
                       ),
                       duration: const Duration(seconds: 2),

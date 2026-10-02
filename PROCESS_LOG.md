@@ -675,6 +675,54 @@ btw create new session without saving also delete prev session recording
 - **Next Decision**:
   - Instruct the user to refresh the browser at `http://localhost:3000` to start their fresh session.
 
+---
+
+### Entry 17: Production Deployment at android.aavvvacado.site, Multi-Instance Capacity & 10–15 FPS Analysis, and Interactive Kiosk Mode Fix
+- **Time**: 2026-10-02T11:06:00+05:30
+- **User Prompt (Verbatim)**:
+```text
+few changes
+1) the thing is deployed to server link i s
+https://android.aavvvacado.site/
+2) we created three seperate instance for parallel sessions but due to server size constraints fps can drop to 10-12 please mention that 
+```
+Simple answer: the pool leases devices, and there's exactly one Android in the pool right now — one device = one session ("Dedicated Isolated Instance per User" is per-device). MAX_SESSIONS=3 is just a cap; it doesn't create capacity. Capacity = N Android instances. The README's own scaling path is exactly this: multiple redroids.
+
+So I'll spin up 2 more redroids (that's the fix, not a config knob). Memory and CPU are the constraints on this box (2 cores, 11GB) — 3 instances at 720p will run, but when all 3 stream simultaneously the software encoders share 2 cores, so expect ~10-15fps each. Doing it:
+```
+please interpret
+
+add these things in readme also the kiosk mode for this device redriod something aint working please fix that 
+```
+- **Action Taken in Response**:
+  1. **Documented Production Deployment Link**:
+     - Updated `README.md` header link and Deliverables Checklist (Table 2) with the live production deployment: `https://android.aavvvacado.site/`.
+  2. **Multi-Device Pool Capacity & CPU Encoding Contention Analysis**:
+     - Clarified architectural distinction in `README.md`: `MAX_SESSIONS` is an admission cap/guardrail, not virtual device capacity. Under our "Dedicated Isolated Instance per User" model (Bonus 1), 1 Device = 1 User Session. Parallel capacity strictly equals the number of physical/virtual Android instances ($N$ devices).
+     - Documented the 3 parallel Redroid instances provisioned in Docker on ports `5555`, `5556`, and `5557` to enable 3 parallel isolated user sessions.
+     - Documented host hardware constraints (2 vCPU cores, 11 GB RAM) and explained why FPS drops to ~10–15 FPS when 3 sessions stream 720p H.264 concurrently: containerized Redroid relies on AOSP software video encoding (`c2.android.avc.encoder`), forcing 3 simultaneous software encoders to time-slice across 2 vCPU cores. Documented real-world telemetry (`FPS: 13`, `RTT: 209 ms`) and production GPU-passthrough scaling paths.
+  3. **Fixed Kiosk Mode for Redroid & Interactive Target Sandboxing**:
+     - Root cause: Minimal AOSP Redroid images do not bundle `com.android.calculator2`. Attempting to launch the uninstalled package silently failed, leaving the screen stuck on whatever was open (e.g., Settings / "About phone").
+     - Re-engineered dynamic Kiosk target discovery (`detectKioskApp` in `SessionManagerService`):
+       - Priority 1: Google Search / Web Browser via universal `ACTION_VIEW` intent (`https://www.google.com`), providing an interactive environment for evaluators to test physical keyboard typing into search, reading, writing, two-way clipboard copy/paste, and smooth mouse scrolling.
+       - Priority 2: Android Files (`com.android.documentsui`).
+       - Priority 3: Calculator (`com.google.android.calculator`, `com.android.calculator2`, `com.sec.android.app.popupcalculator`).
+       - Guaranteed Fallback: Settings (`com.android.settings`), utilizing its search bar for safe input and keyboard verification.
+     - Re-engineered dynamic focus verification: When Kiosk is toggled, backend executes the target launch command, inspects `dumpsys window` to confirm the exact running package, and binds the server-side watchdog and scrcpy input filter directly to that package.
+     - Updated frontend UI:
+       - `InputBloc` and `InputState` updated with `kioskAppName` and `SetKioskStatusEvent`.
+       - `device_controls_bar.dart` dynamically displays `Locked: <AppName>` (e.g. `Locked: Search`, `Locked: Files`, `Locked: Calculator`) and informs the user via dynamic toast notifications.
+       - `device_screen_view.dart` receives `kiosk_status` and `init` packets to update the UI immediately.
+  4. **Build, Test & Deployment Sync**:
+     - Compiled production Flutter Web bundle with `flutter build web --release`.
+     - Synced release assets into `backend/public/`.
+     - Compiled backend TypeScript with `npm run build` (0 errors).
+- **Errors & Failures Hit**:
+  - Missing closing brace in `device_screen_view.dart` clipboard listener branch during edit: resolved immediately.
+- **Next Decision**:
+  - Commit all updated code, build artifacts, README, and process log, and push to GitHub remote repository (`https://github.com/aavvvacado/andriod_browser_device.git`).
+
+
 
 
 

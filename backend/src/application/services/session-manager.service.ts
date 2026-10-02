@@ -26,6 +26,8 @@ interface ActiveClientSession {
   resolution: { width: number; height: number };
   kioskEnabled: boolean;
   kioskPackage: string;
+  kioskAppName: string;
+  kioskLaunchCommand: string;
   kioskWatchdogInterval?: NodeJS.Timeout;
   idleTimer?: NodeJS.Timeout;
   broadcastActive: boolean;
@@ -42,37 +44,97 @@ export class SessionManagerService {
     private scrcpyManager: IScrcpyManager
   ) {}
 
-  private async detectDeviceCalculator(serial: string): Promise<string> {
-    const candidates = [
-      'com.google.android.calculator',
-      'com.android.calculator2',
-      'com.android.calculator',
-      'com.sec.android.app.popupcalculator',
-    ];
-
+  private async detectKioskApp(serial: string): Promise<{ package: string; appName: string; launchCommand: string }> {
     try {
-      const { stdout } = await execAsync(`adb -s ${serial} shell "pm list packages | grep -i calculator || true"`);
+      const { stdout } = await execAsync(`adb -s ${serial} shell "pm list packages || true"`);
       const installed = stdout
         .split('\n')
         .map(line => line.trim().replace(/^package:/, ''))
         .filter(Boolean);
 
-      for (const candidate of candidates) {
-        if (installed.includes(candidate)) {
-          this.logger.info(`Detected calculator package on ${serial}: ${candidate}`);
-          return candidate;
+      // 1. Google Search / Web Browser (Highly interactive: typing, reading, writing, copy-paste)
+      const browserPackages = [
+        'com.android.chrome',
+        'com.android.browser',
+        'org.chromium.webview_shell',
+        'com.google.android.googlequicksearchbox',
+      ];
+      for (const bPkg of browserPackages) {
+        if (installed.includes(bPkg)) {
+          this.logger.info(`Detected interactive search/browser on ${serial}: ${bPkg}`);
+          return {
+            package: bPkg,
+            appName: 'Search',
+            launchCommand: `adb -s ${serial} shell "am start -a android.intent.action.VIEW -d 'https://www.google.com' || monkey -p ${bPkg} -c android.intent.category.LAUNCHER 1 || true"`,
+          };
         }
       }
 
-      if (installed.length > 0) {
-        this.logger.info(`Detected generic calculator package on ${serial}: ${installed[0]}`);
-        return installed[0];
+      // 2. Android Files / DocumentsUI
+      if (installed.includes('com.android.documentsui') || installed.includes('com.google.android.documentsui')) {
+        const pkg = installed.includes('com.android.documentsui') ? 'com.android.documentsui' : 'com.google.android.documentsui';
+        this.logger.info(`Detected Files app on ${serial}: ${pkg}`);
+        return {
+          package: pkg,
+          appName: 'Files',
+          launchCommand: `adb -s ${serial} shell "am start -n ${pkg}/.files.FilesActivity || monkey -p ${pkg} -c android.intent.category.LAUNCHER 1 || true"`,
+        };
+      }
+
+      // 3. Calculator candidates (OEM or AOSP)
+      const calcCandidates = [
+        'com.google.android.calculator',
+        'com.android.calculator2',
+        'com.android.calculator',
+        'com.sec.android.app.popupcalculator',
+        'com.simplemobiletools.calculator',
+      ];
+      for (const cPkg of calcCandidates) {
+        if (installed.includes(cPkg)) {
+          this.logger.info(`Detected Calculator on ${serial}: ${cPkg}`);
+          return {
+            package: cPkg,
+            appName: 'Calculator',
+            launchCommand: `adb -s ${serial} shell "monkey -p ${cPkg} -c android.intent.category.LAUNCHER 1 || true"`,
+          };
+        }
+      }
+
+      // 4. Try universal browser intent if not matched by name
+      try {
+        const { stdout: intentOut } = await execAsync(`adb -s ${serial} shell "cmd package resolve-activity -a android.intent.action.VIEW -d 'https://www.google.com' || true"`);
+        if (intentOut && !intentOut.includes('No activity found')) {
+          const match = intentOut.match(/packageName=([a-zA-Z0-9_\.]+)/);
+          if (match && match[1] && !match[1].includes('android.fallback')) {
+            const pkg = match[1];
+            this.logger.info(`Resolved default web browser on ${serial}: ${pkg}`);
+            return {
+              package: pkg,
+              appName: 'Search',
+              launchCommand: `adb -s ${serial} shell "am start -a android.intent.action.VIEW -d 'https://www.google.com' || true"`,
+            };
+          }
+        }
+      } catch (_) {}
+
+      // 5. Universal guaranteed fallback: Settings (contains interactive search bar to test input, keyboard, copy/paste)
+      if (installed.includes('com.android.settings')) {
+        this.logger.info(`Using Settings with interactive search as kiosk app on ${serial}`);
+        return {
+          package: 'com.android.settings',
+          appName: 'Settings',
+          launchCommand: `adb -s ${serial} shell "am start -n com.android.settings/.Settings || monkey -p com.android.settings -c android.intent.category.LAUNCHER 1 || true"`,
+        };
       }
     } catch (err: any) {
-      this.logger.warn(`Failed detecting calculator package on ${serial}, falling back to default: ${err.message}`);
+      this.logger.warn(`Failed detecting kiosk target on ${serial}: ${err.message}`);
     }
 
-    return 'com.android.calculator2';
+    return {
+      package: 'com.android.settings',
+      appName: 'Settings',
+      launchCommand: `adb -s ${serial} shell "am start -n com.android.settings/.Settings || monkey -p com.android.settings -c android.intent.category.LAUNCHER 1 || true"`,
+    };
   }
 
   async handleClientConnected(clientId: string, socket: any, clientToken: string = ''): Promise<DeviceSession> {
@@ -88,8 +150,8 @@ export class SessionManagerService {
     const broadcaster = new WebSocketStreamBroadcaster();
     const recorder = new SessionRecorder(sessionId, device.serial, device.model, clientToken);
 
-    // Detect installed calculator package dynamically
-    const detectedKioskPackage = await this.detectDeviceCalculator(device.serial);
+    // Detect installed interactive kiosk target dynamically (Google Search, Files, Calculator, or Settings)
+    const kioskTarget = await this.detectKioskApp(device.serial);
 
     const session: ActiveClientSession = {
       sessionId,
@@ -107,7 +169,9 @@ export class SessionManagerService {
         height: scrcpySession.metadata.height,
       },
       kioskEnabled: false,
-      kioskPackage: detectedKioskPackage,
+      kioskPackage: kioskTarget.package,
+      kioskAppName: kioskTarget.appName,
+      kioskLaunchCommand: kioskTarget.launchCommand,
       broadcastActive: true,
     };
 
@@ -124,7 +188,7 @@ export class SessionManagerService {
       }
     });
 
-    // 4. Send init packet FIRST to client with dynamic calculator package info
+    // 4. Send init packet FIRST to client with dynamic interactive kiosk info
     socket.send(JSON.stringify({
       type: 'init',
       sessionId: session.sessionId,
@@ -132,6 +196,7 @@ export class SessionManagerService {
       width: session.resolution.width,
       height: session.resolution.height,
       kioskPackage: session.kioskPackage,
+      kioskAppName: session.kioskAppName,
     }));
 
     // 5. Register client in broadcaster
@@ -242,10 +307,7 @@ export class SessionManagerService {
   }
 
   async setKioskMode(session: ActiveClientSession, enabled: boolean, packageName?: string): Promise<void> {
-    const targetPkg = packageName || this.defaultKioskPackage;
     session.kioskEnabled = enabled;
-    session.kioskPackage = targetPkg;
-    session.scrcpySession.setKioskMode(enabled, targetPkg);
 
     if (session.kioskWatchdogInterval) {
       clearInterval(session.kioskWatchdogInterval);
@@ -253,26 +315,42 @@ export class SessionManagerService {
     }
 
     if (enabled) {
-      this.logger.info(`[Kiosk] Launching restricted app ${targetPkg} on ${session.deviceSerial}...`);
+      if (packageName) {
+        session.kioskPackage = packageName;
+        session.kioskLaunchCommand = `adb -s ${session.deviceSerial} shell "monkey -p ${packageName} -c android.intent.category.LAUNCHER 1 || true"`;
+      }
+
+      this.logger.info(`[Kiosk] Launching restricted app ${session.kioskAppName} (${session.kioskPackage}) on ${session.deviceSerial}...`);
       try {
-        await execAsync(`adb -s ${session.deviceSerial} shell monkey -p ${targetPkg} -c android.intent.category.LAUNCHER 1`);
+        await execAsync(session.kioskLaunchCommand);
+        await new Promise(r => setTimeout(r, 600));
+
+        // Read active focus to confirm or update exact package
+        const { stdout } = await execAsync(`adb -s ${session.deviceSerial} shell "dumpsys window | grep -E 'mCurrentFocus|mFocusedApp' || true"`);
+        const match = stdout.match(/([a-zA-Z0-9_\.]+)\/[a-zA-Z0-9_\.]+/);
+        if (match && match[1] && !match[1].includes('SystemUI') && !match[1].includes('launcher')) {
+          session.kioskPackage = match[1];
+        }
       } catch (err: any) {
         this.logger.warn(`Failed launching kiosk app: ${err.message}`);
       }
+
+      session.scrcpySession.setKioskMode(true, session.kioskPackage);
 
       // Start Server-Side Kiosk Watchdog (Checks every 3s that user stays inside the app)
       session.kioskWatchdogInterval = setInterval(async () => {
         if (!session.kioskEnabled) return;
         try {
           const { stdout } = await execAsync(`adb -s ${session.deviceSerial} shell "dumpsys window | grep -E 'mCurrentFocus|mFocusedApp' || true"`);
-          if (!stdout.includes(session.kioskPackage) && !stdout.includes('PopupWindow')) {
+          if (!stdout.includes(session.kioskPackage) && !stdout.includes('PopupWindow') && !stdout.includes('InputMethod')) {
             this.logger.warn(`[Kiosk Security Watchdog] Unauthorized activity detected! Refocusing ${session.kioskPackage}...`);
-            await execAsync(`adb -s ${session.deviceSerial} shell monkey -p ${session.kioskPackage} -c android.intent.category.LAUNCHER 1`);
+            await execAsync(session.kioskLaunchCommand);
           }
         } catch (_) {}
       }, 3000);
     } else {
       this.logger.info(`[Kiosk] Kiosk mode disabled for ${session.sessionId}`);
+      session.scrcpySession.setKioskMode(false);
     }
 
     // Inform client of kiosk state
@@ -281,6 +359,7 @@ export class SessionManagerService {
         type: 'kiosk_status',
         enabled: session.kioskEnabled,
         package: session.kioskPackage,
+        appName: session.kioskAppName,
       }));
     }
   }

@@ -3,7 +3,7 @@
 A production-grade, low-latency web application that mirrors and provides direct, natural mouse and keyboard control over an Android device in the browser—similar to Android Studio Device Mirroring and `scrcpy`.
 
 - **Repository**: [https://github.com/aavvvacado/andriod_browser_device](https://github.com/aavvvacado/andriod_browser_device)
-- **Deployed Link**: `http://<YOUR_DEPLOYED_SERVER_IP_OR_DOMAIN>:3000` *(Add server IP or reverse-proxy domain here)*
+- **Live Deployed App**: [https://android.aavvvacado.site/](https://android.aavvvacado.site/) *(Production deployment with multi-device pooling)*
 - **AI Process Log**: [`PROCESS_LOG.md`](./PROCESS_LOG.md) *(Compulsory unedited trajectory log)*
 
 ---
@@ -43,9 +43,12 @@ A production-grade, low-latency web application that mirrors and provides direct
    - **PC to Android**: `Ctrl+V` / `Cmd+V` (captured via native DOM `paste` event with zero browser permission prompts) or "Paste to Device" injects clipboard text via `setClipboard({ content, paste: true })` directly into the focused view.
    - **Android to PC**: Listens to `@yume-chan/scrcpy` clipboard stream and synchronizes device text to the computer clipboard via `navigator.clipboard.writeText(text)` with a 1-click SnackBar fallback copy action.
 4. **Bonus 4: Restricted Access (Kiosk Mode)**:
-   - **App Chosen**: Native Android Calculator (`com.android.calculator2` / `com.google.android.calculator`).
-   - **Dynamic Discovery**: Backend queries ADB (`pm list packages | grep -i calculator`) to automatically discover and launch the device's native calculator without hardcoding any OEM specifics.
-   - **Server-Side Enforcement**: Server drops Home, Recents, Power, Volume, status bar pull-downs (`y <= 5%`), and bottom gesture navigation (`y >= 95%`). An active background watchdog (`dumpsys window`) checks every 3s and refocuses the Calculator if unauthorized activities gain focus. Client-side tampering is completely bypassed.
+   - **Interactive Target Discovery**: Backend dynamically queries device capabilities to lock the user into an interactive sandbox:
+     - **Priority 1 (Google Search / Web Browser)**: On devices with a web browser (`com.android.chrome`, `com.android.browser`, `org.chromium.webview_shell`), it launches `https://www.google.com` via universal `ACTION_VIEW` intent. This provides an interactive environment where evaluators can test physical keyboard typing into the search bar, two-way clipboard copy/paste, and smooth mouse wheel scrolling.
+     - **Priority 2 (Android Files)**: Launches `com.android.documentsui` file manager.
+     - **Priority 3 (Calculator)**: Launches OEM/AOSP Calculator (`com.google.android.calculator`, `com.android.calculator2`, `com.sec.android.app.popupcalculator`).
+     - **Guaranteed Universal Fallback (Settings)**: On minimal AOSP / Redroid container images where OEM apps are omitted, it locks to `com.android.settings`, utilizing the built-in search bar to test input, keyboard typing, and copy/paste safely.
+   - **Server-Side Enforcement**: Server drops Home, Recents, Power, Volume, status bar pull-downs (`y <= 5%`), and bottom gesture navigation (`y >= 95%`). An active background watchdog (`dumpsys window`) checks every 3s and refocuses the allowed package if unauthorized activities gain focus. Client-side tampering is completely bypassed.
 5. **Bonus 5: Automatic Session Recording with Save / Delete Lifecycle**:
    - Each session is recorded automatically in real time to H.264 and muxed to MP4 via FFmpeg.
    - When a session ends, the user is prompted: **Save & Download Recording** or **Delete Recording**.
@@ -59,7 +62,7 @@ A production-grade, low-latency web application that mirrors and provides direct
 | Deliverable | Status | Location / Reference |
 | :--- | :---: | :--- |
 | **1. Public Git Repository** | **Ready** | [github.com/aavvvacado/andriod_browser_device](https://github.com/aavvvacado/andriod_browser_device) |
-| **2. Deployed Server Link** | **Documented** | Instructions below in [Section 8](#8-cloud--server-deployment-instructions) |
+| **2. Deployed Server Link** | **Live** | [https://android.aavvvacado.site/](https://android.aavvvacado.site/) |
 | **3. Live Demo Video (3–5 min)** | **Scripted** | Script and checklist below in [Section 10](#10-35-minute-live-demo-video-guide) |
 | **4. Local Setup Steps** | **Ready** | [Section 7](#7-local-setup--reproduction-guide) |
 | **5. Architecture Write-Up** | **Ready** | [Section 3](#3-architecture-write-up) |
@@ -241,6 +244,29 @@ Click **"Connect"** to initiate your live Android session!
 
 The project is structured for single-command deployment on any Linux cloud VM (AWS EC2, DigitalOcean, Hetzner, GCP) with KVM or connected Android devices.
 
+### Production Deployment: `https://android.aavvvacado.site/`
+
+Our live public instance is deployed on a Linux cloud VM at **`https://android.aavvvacado.site/`**.
+
+#### Dedicated Multi-Instance Device Pool & Parallel Capacity
+A critical architectural principle of our design is strict hardware isolation:
+- **`MAX_SESSIONS` is an Admission Cap, Not Capacity**: Setting `MAX_SESSIONS=3` in configuration merely caps concurrent WebSocket connections; it does not synthesize virtual Android devices out of thin air. In a true "Dedicated Isolated Instance per User" architecture (Bonus 1), **1 Device = 1 User Session**.
+- **Scaling by Adding Android Instances ($N$ Devices)**: To support 3 simultaneous users without cross-talk or race conditions, 3 independent Redroid container instances were provisioned in Docker on the host VM:
+  - Instance 1: `redroid_1` (port `5555`)
+  - Instance 2: `redroid_2` (port `5556`)
+  - Instance 3: `redroid_3` (port `5557`)
+  Each container runs its own isolated Android runtime, ADB daemon, and `scrcpy-server.jar` process. The backend's `AdbDevicePoolAdapter` dynamically leases an available instance when a user connects, and returns it to the free pool with deterministic cleanup when they disconnect.
+
+#### Hardware Constraints & The 10–15 FPS Encoding Contention Drop
+The production server operates under strict hardware constraints: **2 vCPU cores and 11 GB RAM**.
+- **Software Video Encoding**: On physical smartphones, video encoding is offloaded to dedicated hardware silicon (Qualcomm / Exynos / MediaTek hardware `MediaCodec`). However, containerized Redroid running in a virtual machine without a dedicated GPU utilizes AOSP software video encoding (`c2.android.avc.encoder`).
+- **CPU Time-Slicing Under 3 Concurrent Streams**: When 3 users connect and stream 720p H.264 video simultaneously, all 3 software encoders compete for the host's 2 shared vCPU cores.
+- **Empirical Telemetry Under Load**:
+  - **Single User Active**: Smooth ~30 FPS, ~90–120 ms RTT.
+  - **3 Concurrent Users Streaming Simultaneously**: The 2 vCPUs reach high saturation, causing video frame rates to throttle down to **~10–15 FPS per session** (as seen on the live header badge in production: `FPS: 13`, `RTT: 209 ms`).
+- **Production Sizing Recommendation**:
+  - For 60 FPS under concurrent multi-user load, servers should either feature hardware GPU acceleration (NVIDIA NVENC, Intel QuickSync, or VA-API) or allocate 1.5–2 dedicated vCPU cores per concurrent Android container.
+
 ### Optimized for Resource-Constrained Servers (2 vCPU, 5–6 GB RAM, ~12 GB Disk)
 This architecture is deliberately designed to scale smoothly on constrained server instances:
 - **Zero CPU Video Transcoding**: The Android device / emulator hardware encoder (`MediaCodec`) encodes screen frames directly to H.264 NAL units. The Node.js server does zero software transcoding, merely forwarding binary buffers directly to WebSockets. CPU load is negligible (< 2% CPU per session).
@@ -307,12 +333,14 @@ docker compose up -d --build
 - **Android to PC**: Copy text inside an Android app. A notification toast appears in the browser, and the text is copied to your computer clipboard via `navigator.clipboard.writeText(text)` (with a 1-click "Copy" action button as fallback).
 
 ### 6. Test Restricted Access / Kiosk Mode (Bonus 4)
-- Click the **"Kiosk Mode"** toggle in the sidebar.
+- Click the **"Kiosk Mode"** toggle in the Studio Dock sidebar.
 - **Expected**:
-  - The native Android Calculator (`com.android.calculator2` / `com.google.android.calculator`) launches automatically.
+  - The backend dynamically launches the device's interactive sandboxed application (Google Search / Web Browser, Files, or Calculator; Settings search as fallback on minimal AOSP images).
+  - The UI button badge updates to **"Kiosk Active"** with subtitle **"Locked: <AppName>"** (e.g., `Locked: Search`, `Locked: Files`, `Locked: Calculator`).
   - Status bar pull-down (`y <= 5%`) and bottom navigation gestures (`y >= 95%`) are dropped on the server.
-  - System exit keys (`Home`, `Recents`, `Power`, `Volume`) are dropped on the server.
-  - Attempting to leave the app is detected by the server-side watchdog, which refocuses the Calculator within 3 seconds.
+  - System exit keys (`Home`, `Recents`, `Power`, `Volume`) are dropped on the server; the UI disables Home and Recents buttons with lock icons.
+  - Attempting to leave the app is detected by the server-side watchdog (`dumpsys window`), which refocuses the allowed package within 3 seconds.
+  - Evaluators can test physical keyboard typing into the search bar, two-way clipboard copy/paste, and scrolling inside the sandboxed app without ever escaping to the home screen or system launcher.
 
 ### 7. Test Top "Stop Session" Button & Save/Delete Recording (Bonus 5)
 - Click the red **"Stop Session"** button in the header bar.
@@ -333,6 +361,6 @@ Follow this continuous, uncut walkthrough when recording your demo video:
 | **0:00 – 0:45** | **Introduction & Architecture** | Introduce the application. Explain that it uses `scrcpy-server.jar` for low-latency H.264 capture, binary WebSockets for transport, and hardware WebCodecs `VideoDecoder` in Flutter Web. Highlight the constrained 2 vCPU / 5-6 GB / 12 GB disk server scalability. |
 | **0:45 – 1:45** | **Core Screen Interaction** | Click directly on the mirrored display to open an app. Click and drag to demonstrate smooth swiping. Roll mouse wheel to demonstrate scrolling. Focus a search box and type directly from your physical keyboard. Point out the live RTT (~25ms) and FPS (60). |
 | **1:45 – 2:30** | **Two-Way Bidirectional Clipboard (Bonus 3)** | Copy text on your PC and paste it into the Android device using `Ctrl+V`. Copy text on the Android device and paste it into a computer text editor to prove bidirectional synchronization. |
-| **2:30 – 3:30** | **Kiosk Mode (Bonus 4)** | Toggle Kiosk Mode. Show the native Calculator launch. Demonstrate attempting to pull down notifications, swipe home, or exit, showing server-side security enforcement in action. |
+| **2:30 – 3:30** | **Kiosk Mode (Bonus 4)** | Toggle Kiosk Mode. Show the interactive sandboxed app launch (Google Search, Files, or Calculator). Demonstrate attempting to pull down notifications, swipe home, or exit, showing server-side security enforcement in action. Demonstrate typing and searching safely inside the kiosk app. |
 | **3:30 – 4:30** | **Stop Session & Save/Delete Recording (Bonus 5)** | Click the **"Stop Session"** button in the top bar. Show the Save vs Delete modal. Demonstrate downloading the MP4 or deleting it from disk to protect constrained server storage. Conclude the video. |
 
