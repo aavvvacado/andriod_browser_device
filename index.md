@@ -27,6 +27,7 @@ flowchart LR
 This documentation site is split into two modular tracks: **Operations and Overview** for general deployment, and **Technical Architecture and Subsystems** for engineers studying the codebase.
 
 ### Operations and Overview
+
 | Document | Description |
 | :--- | :--- |
 | [**Executive Summary & Architecture Matrix**](01-Executive-Summary) | Project overview, technical rubric mapping, live telemetry, and submission deliverables |
@@ -34,6 +35,7 @@ This documentation site is split into two modular tracks: **Operations and Overv
 | [**Cloud Deployment & Docker Setup**](09-Cloud-Deployment-and-Docker) | Production deployment on Ubuntu Linux VM, KVM acceleration, and multi-Redroid pooling |
 
 ### Technical Architecture and Subsystems
+
 | Document | Description |
 | :--- | :--- |
 | [**Video Streaming Pipeline & WebCodecs**](02-Video-Streaming-Pipeline) | Scrcpy capture, H.264 NAL demuxing, WebCodecs hardware decoding, and zero-copy canvas blit |
